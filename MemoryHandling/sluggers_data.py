@@ -116,9 +116,9 @@ class Player(Refreshable,Writable):
 
     class Stats:
         def __init__(self):
-            batting = self.Batting()
-            pitching = self.Pitching()
-            fielding = self.Fielding()
+            self.batting = self.Batting()
+            self.pitching = self.Pitching()
+            self.fielding = self.Fielding()
             self.positions_played: list[str] = []
             
             
@@ -130,11 +130,14 @@ class Player(Refreshable,Writable):
                 self.doubles = 0
                 self.triples = 0
                 self.runs = 0
-                self.rbis = 0
+                self.rbi = 0
                 self.walks = 0
                 self.home_runs = 0
                 self.strikeouts = 0
                 self.hit_by_pitch = 0
+                self.star_hits = 0
+                self.flyouts = 0
+                self.ground_outs = 0
                 
                     
         
@@ -165,6 +168,7 @@ class Player(Refreshable,Writable):
                 self.strikes = 0
                 self.balls = 0
                 self.walks = 0
+                self.hit_batsman = 0
                 self.strikeouts = 0
                 self.hits_allowed = 0
                 self.home_runs_allowed = 0
@@ -172,6 +176,7 @@ class Player(Refreshable,Writable):
                 self.earned_runs = 0
                 self.pitch_count = 0
                 self.outs_pitched = 0
+                self.star_pitches = 0
             
             @property
             def innings_pitched(self):
@@ -350,14 +355,6 @@ class Team(Refreshable, Writable):
             return player_ref.batting_index
     
     
-    def write_fielding_speed(self):
-        for player in self.players:
-            player.attributes.write_fielding_speed()
-    
-    def write_baserunning_speed(self):
-        for player in self.players:
-            player.attributes.write_baserunning_speed()
-    
     class PositionIndexes():
         def __init__(self):
             self.pitcher = 0
@@ -384,18 +381,33 @@ class Team(Refreshable, Writable):
             }
         
     TEAM_BRANDING = {
-        0x00: "Mario Heroes",
-        0x01: "Luigi Gentlemen",
-        0x02: "DK Animals",
-        0x03: "Diddy Red Caps",
-        0x04: "Peach Dynasties",
-        0x05: "Daisy Queen Bees",
-        0x06: "Yoshi Islanders",
-        0x07: "Bowser Flames",
-        0x08: "Wario Garlics",
+        0x00: "Mario Fireballs",
+        0x01: "Luigi Knights",
+        0x02: "DK Wilds",
+        0x03: "Diddy Monkeys",
+        0x04: "Peach Monarchs",
+        0x05: "Daisy Flowers",
+        0x06: "Yoshi Eggs",
+        0x07: "Bowser Monsters",
+        0x08: "Wario Muscles",
         0x09: "Waluigi Spitballs",
         0x0A: "Birdo Bows",
-        0x0B: "Jr. Bombers"
+        0x0B: "Jr. Rookies"
+    }
+    
+    TEAM_SHORT = {
+        0x00: "Fireballs",
+        0x01: "Knights",
+        0x02: "Wilds",
+        0x03: "Monkeys",
+        0x04: "Monarchs",
+        0x05: "Flowers",
+        0x06: "Eggs",
+        0x07: "Monsters",
+        0x08: "Muscles",
+        0x09: "Spitballs",
+        0x0A: "Bows",
+        0x0B: "Rookies"
     }
     
     OFFENSE_DEFENSE = {
