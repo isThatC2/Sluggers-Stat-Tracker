@@ -23,7 +23,7 @@ inning_half = "Top"
 ball_status: int  = 0
 ball_holder: Player | None
 ball_is_being_held: bool
-
+runs_this_play = 0
 def hook_dolphin():
     while True:
         try:
@@ -300,9 +300,7 @@ def fielding_state(state):
             batter.stats.batting.rbi += score_change
             pitcher.stats.pitching.earned_runs += score_change
             print(f"score changed by {score_change}! earned runs and rbis recorded")
-            
-            
-        
+
         out_this_tick = False
         last_ball_status = game.ball_possession.ball_status.value
         update_globals()
@@ -348,19 +346,73 @@ def mid_inning_transition_state(state):
 
 
 def load_next_batter_state(state):
-    pass
+    global strikes, balls, pitches, inning_changing, batter, pitcher
+    check_hook_status()
+    
+    next_batter = game.get_on_deck_batter()
+    next_batter_index = game.get_on_deck_batter_index()
+    next_on_deck_index = (next_batter_index + 1) % 9
+    game.offense_team.batting_index = next_batter_index
+    strikes, balls = 0, 0
+    game.runs_this_play = 0
+    pitcher.stats.pitching.batters_faced += 1
+    if not inning_changing:
+        next_batter.stats.batting.at_bats += 1
+        
+        
+    while state.display == "LOAD_NEXT_BATTER":
+        game.current_balls.refresh()
+        game.current_strikes.refresh()
+        game.current_pitches.refresh()
+        state.refresh()
 
 def end_score_screen_state(state):
-    pass
+    check_hook_status()
+    print("Final Score:")
+    print(team1.branding.display, "-", team1.score.value)
+    print(team2.branding.display, "-", team2.score.value)
+    
+    if team1.score.value > team2.score.value:
+        print(team1.branding.display, "wins!")
+    elif team2.score.value > team1.score.value:
+        print(team2.branding.display, "wins!")
+    else:
+        print("The game ended in a tie!")
+    
+    for i in range(9):
+        team1.players[i].ability.deactivate_all()
+        team2.players[i].ability.deactivate_all()
+    while state.display == "END_SCORE_SCREEN":
+        state.refresh()  
 
 def pause_state(state):
-    pass
+    check_hook_status()
+    print("Game Paused...")
+    while state.display == "PAUSE":
+        refresh_globals()
+        update_globals()
+        state.refresh()
 
 def end_stat_screen_state(state):
-    pass
+    check_hook_status()
+    print("FINAL STATS:")
+    for player in team1.players:
+        print(f"{player.name}")
+        print("---------------------")
+        print("")
+        print(f"BATTING:")
+        print(f"")
+        
+    
 
 def hr_base_celebration_state(state):
-    pass
+    global batter, pitcher
+    check_hook_status()
+    
+    print("Home Run for", batter.name)
+    
+    while state.display ==  "HR_BASE_CELEBRATION" or state.display == "HR_HOMEIN_CELEBRATION":
+        state.refresh()
 
 def change_lineup_state(state):
     global pitcher
@@ -368,7 +420,7 @@ def change_lineup_state(state):
     print("Defense is Changing the Lineup...")
     
     pre_switch_pitcher = game.get_current_pitcher()
-    while state.display == "SWAP_PITCHER":
+    while state.display == "CHANGE_LINEUP":
         refresh_globals()
         game.set_positions()
         update_globals()
