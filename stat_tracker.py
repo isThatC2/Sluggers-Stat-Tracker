@@ -1,7 +1,7 @@
 import time
 import sys
 import dolphin_memory_engine as dme
-from MemoryHandling.dolphin_mem import Data, read_data, write_data
+from dolphin_mem import Data, read_data, write_data
 from MemoryHandling.sluggers_data import Field, Player, Team, Game
 from openpyxl import Workbook, load_workbook
 
@@ -16,6 +16,7 @@ inning: int = 0
 pitches: int = 0
 batter: Player
 pitcher: Player
+last_batter: Player
 positions: dict 
 inning_changing: bool = False
 inning_half = "Top"
@@ -24,6 +25,11 @@ ball_status: int  = 0
 ball_holder: Player | None
 ball_is_being_held: bool
 runs_this_play = 0
+stats_printed = False
+ball_hit_flag = False
+baserunners: list[Player|None] = [None] * 3
+steal_attemptees: list = [None] * 3
+at_bat_has_begun = False
 def hook_dolphin():
     while True:
         try:
@@ -59,21 +65,20 @@ def detect_match_start():
 
 #----------------------REFRESH/UPDATE GLOBAL VALUES-----------------
 def refresh_globals():
-    game.batter_index.refresh()
+    game.current_batter.index.refresh()
     game.current_batter.refresh_all()
     game.current_pitcher.refresh_all()
     team1.pitching_index.refresh()
     team2.pitching_index.refresh()
     team1.meter.refresh()
     team2.meter.refresh()
-    game.current_outs.refresh()
-    game.current_balls.refresh()
-    game.current_strikes.refresh()
+    game.outs.refresh()
+    game.balls.refresh()
+    game.strikes.refresh()
     game.current_inning.refresh()
-    game.current_pitches.refresh()
+    game.pitches.refresh()
     team1.score.refresh()
     team2.score.refresh()
-    game.rng.refresh_all()
     game.ball_was_hit.refresh()
     game.batters_this_inning.refresh()
     game.ball_possession.refresh_all()
@@ -82,9 +87,9 @@ def update_globals():
     global team1_score, team2_score, outs, balls, strikes, pitches, ball_status, ball_holder, ball_is_being_held
     team1_score = team1.score.value
     team2_score = team2.score.value
-    outs = game.current_outs.value
-    balls = game.current_balls.value
-    strikes = game.current_strikes.value
+    outs = game.outs.value
+    balls = game.balls.value
+    strikes = game.strikes.value
     ball_status = game.ball_possession.ball_status.value
     ball_holder = game.get_player_having_ball()
     if game.ball_possession.current_ball_holder_index.value >= 0:
@@ -92,34 +97,118 @@ def update_globals():
     else:
         ball_is_being_held = False
 
+#----------------------HELPER FUNCTIONS-----------------------------
+def print_stats(team: Team):
+    print(f"{team.branding.display} Stats:")
+    for player in team.players:
+        s = player.stats
+        print("")
+        print(f"{player.name}'s Stats:")
+        print(f"BATTING STATS:")
+        print("---------------------")
+        print(f"At Bats: {s.batting.at_bats}")
+        print(f"Runs: {s.batting.runs}")
+        print(f"RBI: {s.batting.rbi}")
+        print(f"Home Runs: {s.batting.home_runs}")
+        print(f"Strikeouts: {s.batting.strikeouts}")
+        print(f"Walks: {s.batting.walks}")
+        print(f"Star Hits: {s.batting.star_hits}")
+        print(f"Hit By Pitch: {s.batting.hit_by_pitch}")
+        print(f"Singles: {s.batting.singles}")
+        print(f"Doubles: {s.batting.doubles}")
+        print(f"Triples: {s.batting.triples}")
+        print(f"Fly Outs: {s.batting.flyouts}")
+        print(f"Ground Outs: {s.batting.ground_outs}")
+        print(f"Batting Average: {s.batting.batting_average:.3f}")
+        print(f"Slugging Percentage: {s.batting.slugging_percentage:.3f}")
+        print(f"Total Bases: {s.batting.total_bases}")
+        print(f"On Base Percentage: {s.batting.on_base_percentage:.3f}")
+        print(f"On Base Plus Slugging: {s.batting.on_base_slugging:.3f}")
+        
+        print("FIELDING STATS:")
+        print("---------------------")
+        print(f"Putouts: {s.fielding.putouts}")
+        print(f"Assists: {s.fielding.assists}")
+        print(f"Errors: {s.fielding.errors}")
+        print(f"Double Plays: {s.fielding.double_plays}")
+        print(f"Triple Plays: {s.fielding.triple_plays}")
+        print(f"Close Plays Won: {s.fielding.close_plays_won}")
+        print(f"Close Plays Lost: {s.fielding.close_plays_lost}")
+        print(f"Fielding Chance: {s.fielding.fielding_chances:.3f}")
+        
+        print("PITCHING STATS:")
+        print("---------------------")
+        print(f"Innings Pitched: {s.pitching.innings_pitched:.1f}")
+        print(f"Earned Runs: {s.pitching.earned_runs}")
+        print(f"Strikeouts: {s.pitching.strikeouts}")
+        print(f"Star Pitches: {s.pitching.star_pitches}")
+        print(f"Batters Faced: {s.pitching.batters_faced}")
+        print(f"Home Runs Allowed: {s.pitching.home_runs_allowed}")
+        print(f"Hits Allowed: {s.pitching.hits_allowed}")
+        print(f"Balls: {s.pitching.balls}")
+        print(f"Strikes: {s.pitching.strikes}")
+        print(f"Walks: {s.pitching.walks}")
+        print(f"Hit By Pitch: {s.pitching.hit_by_pitch}")
+        print(f"ERA: {s.pitching.era:.2f}")
+        
+        print(f"Running Stats:")
+        print("---------------------")
+        print(f"Steals: {s.running.steals}")
+        print(f"Caught Stealing: {s.running.caught_stealing}")
+        print(f"Steal Attempts: {s.running.steal_attempts}")
+        print(f"Close Plays Won: {s.running.close_plays_won}")
+        print(f"Close Plays Lost: {s.running.close_plays_lost}")
+
+def fill_baserunner_list():
+    global baserunners
+    r = game.baserunners
+    runnerlist = [r.first_base, r.second_base, r.third_base]
+    
+    for i, runner in enumerate(runnerlist):
+        if runner.player is not None:
+            baserunners[i] = runner.player
+        else:
+            baserunners[i] = None
+            
+    
 #----------------------REPLAY FUNCTIONS-----------------------------
 def check_for_replay():
     """Checks if a replay is currently underway by checking if either a score or out value decreased."""
-    global Batter_Index, Outs, Team1_Score, Team2_Score
-    game.team1.score.refresh()
-    game.team2.score.refresh()
-    game.current_outs.refresh()
-    score_value1: int = game.team1.score.value
-    score_value2: int = game.team2.score.value
-    outs_value: int = game.current_outs.value
-    batter_index_value: int = game.batter_index.value or 0
+    global batter_index, outs, team1_score, team2_score
+    team1.score.refresh()
+    team2.score.refresh()
+    game.outs.refresh()
+    score_value1: int = team1.score.value
+    score_value2: int = team2.score.value
+    outs_value: int = game.outs.value
+    batter_index_value: int = game.current_batter.index.value or 0
 
     score_or_out_changed = (
         score_value1 < team1_score
         or score_value2 < team2_score
         or outs_value < outs
     )
+    
+    print("REPLAY CHECK")
+    print(f"score_value1 = {score_value1}, team1.score = {team1.score}")
+    print(f"score_value2 = {score_value2}, team1.score = {team2.score}")
+    print(f"outs_value = {outs_value}, outs = {outs}")
+    
     if batter_index_value == batter_index and score_or_out_changed:
+        print("Returning True")
+        print("")
         return True
     else:
+        print("Returning False")
+        print("")
         return False
 
 
 def replay_state(state):
-    """Loop that waits """
-    global isReplay
+    """Loop that waits for replays to finish"""
     print("Replay Detected. Pausing Memory Tracking")
     while True:
+        state.refresh()
         if (state.display in {
             "LOAD_NEXT_BATTER",
             "END_SCORE_SCREEN",
@@ -151,43 +240,62 @@ def intro_cutscene_state(state):
 
 def batting_state(state):
     global batter_index, team1_score, team2_score, outs, balls, strikes, pitches, is_replay, batter, pitcher, positions, inning_changing
+    global ball_hit_flag, steal_attemptees
     is_replay = check_for_replay()
     if is_replay:
         replay_state(state)
         return
     
-    game.current_pitches.refresh()
     strikeout_recorded = False
     ball_hit_flag = False
     
     offense_meter = game.offense_team.meter.value
     defense_meter = game.defense_team.meter.value
-    game.current_strikes.refresh()
-    game.current_balls.refresh()
-    game.current_outs.refresh()
+    game.strikes.refresh()
+    game.balls.refresh()
+    game.outs.refresh()
     game.runs_this_play = 0
     
     game.current_batter.refresh_all()
-    game.batter_index.refresh()
+    game.current_batter.index.refresh()
     batter = game.get_current_batter()
     pitcher = game.get_current_pitcher()
     positions = game.positions.get_all_position_indexes()
     game.positions.refresh_all()
+    
     game.set_positions()
     if not game.match_started:
         game.match_started = True
         
-    if game.current_pitches.value != pitches or batter is not game.get_current_batter():
-        pitches = game.current_pitches.value
-        
-    if game.current_strikes.value == 0 and game.current_balls.value == 0:
-        print(f"{pitcher.name} Vs. {batter.name}")
-        print(game.current_outs.value, "Outs")
+    if game.pitches.value != pitches or batter is not game.get_current_batter():
+        pitches = game.pitches.value
     
-    print(game.current_balls.value, "-", game.current_strikes.value)
+    game.pitches.refresh()
+    
+    global at_bat_has_begun    
+    if game.pitches.value == 0 and not at_bat_has_begun:
+        
+        print(f"{pitcher.name} Vs. {batter.name}")
+        print(game.outs.value, "Outs")
+        at_bat_has_begun = True
+    
+    print(game.balls.value, "-", game.strikes.value)
     
     game.set_positions()
-
+    game.set_baserunners()
+    fill_baserunner_list()
+    steal_attemptees = [None] * 3
+    
+    if baserunners[0] is not None:
+        print(f"{baserunners[0].name} is on first.")
+    
+    if baserunners[1] is not None:
+        print(f"{baserunners[1].name} is on second.")
+    
+    if baserunners[2] is not None:
+        print(f"{baserunners[2].name} is on third.")
+    
+        
     while state.display == "BATTING":
         check_hook_status()
         refresh_globals()
@@ -202,43 +310,62 @@ def batting_state(state):
         
         if defense_meter - game.defense_team.meter.value in (50, 100):
             pitcher.stats.pitching.star_pitches += 1
-            print(f"{pitcher.stats} used a star pitch!")
+            print(f"{pitcher.name} used a star pitch!")
         
         if game.ball_was_hit.value == 1:
             ball_hit_flag = True
             if offense_meter - game.offense_team.meter.value in (50, 100):
                 batter.stats.batting.star_hits += 1
-                print(f"{pitcher.stats} used a star pitch!")
+                print(f"{batter.name} used a star hit!")
         
-        if game.current_strikes.value > strikes:
+        if game.strikes.value > strikes:
             pitcher.stats.pitching.strikes += 1
-            print(f"strike recorded")
+            print(f"strike recorded for {pitcher.name}")
         
-        if game.current_balls.value > balls:
+        if game.balls.value > balls:
             pitcher.stats.pitching.balls += 1
-            print("ball recorded")
+            print(f"ball recorded for {pitcher.name} ")
         
-        if game.current_balls.value == 4 and balls != 4:
+        if game.balls.value == 4 and balls != 4:
             pitcher.stats.pitching.walks += 1
             batter.stats.batting.walks += 1
             print(f"{pitcher.name} walked {batter.name}!")
             
-        if game.current_strikes.value == 3 and strikes != 3:
-            pitcher.stats.pitching.strikeouts += 1
+        
+        
+        if game.outs.value > outs:
             pitcher.stats.pitching.outs_pitched += 1
-            batter.stats.batting.strikeouts += 1
-            print(f"{pitcher.name} struckout {batter.name}!")
-            strikeout_recorded = True
-            
-        if game.current_outs.value == 3:
-            inning_changing = True
+            if game.strikes.value == 3:
+                pitcher.stats.pitching.strikeouts += 1
+                batter.stats.batting.strikeouts += 1
+                print(f"{pitcher.name} struckout {batter.name}!")
+            if game.outs.value == 3:
+                inning_changing = True
+        
+        for runner in baserunners:
+            if runner is not None and runner.base is not None:
+                runner.base.refresh_all()
+                if runner.base.is_stealing.value != 0:
+                    if runner not in steal_attemptees:
+                        steal_entry = [runner, runner.base.base_num]
+                        steal_attemptees.append(steal_entry)
+                        runner.stats.running.steal_attempts += 1
+                        print(f"{runner.name} is attempting to steal!!")
+                        
+                        
+                    
+                
             
         offense_meter = game.offense_team.meter.value
         defense_meter = game.defense_team.meter.value
         update_globals()
         state.refresh()
+        
+        
+        
 def fielding_state(state):
-    global Batter_Index, Team1_Score, Team2_Score, Outs, Balls, Strikes, Pitches, isReplay, Batter, Pitcher, InningChanging, RunScored, NumBaserunners, BallStatus, BallIsBeingHeld, BallHolder
+    global batter_index, team1_score, team2_score, outs, balls, strikes, pitches, is_replay, batter, pitcher
+    global inning_changing, ball_status, ball_is_being_held, ball_holder, runs_this_play
     
     score_change = 0
     last_ball_status = None
@@ -261,16 +388,18 @@ def fielding_state(state):
         #Ball Status Shit
         if last_ball_status is not None:
             if  ball_status != last_ball_status:
-                time.sleep(0.03)
+                time.sleep(0.06)
                 last_holder = game.get_last_player_having_ball()
                 if ball_status == 1:
-                    game.current_outs.refresh()
-                    if game.current_outs.value > outs:
+                    game.outs.refresh()
+                    if game.outs.value > outs:
+                        pitcher.stats.pitching.outs_pitched += 1
                         out_this_tick = True
                         
                     if last_holder is not None:
                         #print(f"{last_holder.name} got the ball!")
                         if out_this_tick:
+                            print(f"{last_holder.name} recorded a putout!")
                             last_holder.stats.fielding.putouts += 1
                             if last_thrower is not None:
                                 last_thrower.stats.fielding.assists += 1
@@ -288,10 +417,9 @@ def fielding_state(state):
                         last_thrower = None
         
         
-        #Pitcher Stamina Correcting. 
         if game.offense_team is team1:
             score_change = game.team1.score.value - team1_score
-        elif game.offense_team is team2:
+        else:
             score_change = game.team2.score.value - team2_score
         
         if score_change > 0:
@@ -347,8 +475,9 @@ def mid_inning_transition_state(state):
 
 def load_next_batter_state(state):
     global strikes, balls, pitches, inning_changing, batter, pitcher
+    global at_bat_has_begun
     check_hook_status()
-    
+    at_bat_has_begun = False
     next_batter = game.get_on_deck_batter()
     next_batter_index = game.get_on_deck_batter_index()
     next_on_deck_index = (next_batter_index + 1) % 9
@@ -361,9 +490,9 @@ def load_next_batter_state(state):
         
         
     while state.display == "LOAD_NEXT_BATTER":
-        game.current_balls.refresh()
-        game.current_strikes.refresh()
-        game.current_pitches.refresh()
+        game.balls.refresh()
+        game.strikes.refresh()
+        game.pitches.refresh()
         state.refresh()
 
 def end_score_screen_state(state):
@@ -379,9 +508,6 @@ def end_score_screen_state(state):
     else:
         print("The game ended in a tie!")
     
-    for i in range(9):
-        team1.players[i].ability.deactivate_all()
-        team2.players[i].ability.deactivate_all()
     while state.display == "END_SCORE_SCREEN":
         state.refresh()  
 
@@ -394,22 +520,22 @@ def pause_state(state):
         state.refresh()
 
 def end_stat_screen_state(state):
+    global stats_printed
     check_hook_status()
-    print("FINAL STATS:")
-    for player in team1.players:
-        print(f"{player.name}")
-        print("---------------------")
-        print("")
-        print(f"BATTING:")
-        print(f"")
-        
-    
+    print_stats(team1)
+    print_stats(team2)
+    stats_printed = True
+    while state.display == "END_STAT_SCREEN":
+        state.refresh()
+
 
 def hr_base_celebration_state(state):
     global batter, pitcher
     check_hook_status()
     
-    print("Home Run for", batter.name)
+    print(f"{batter.name} hits a homer off of {pitcher.name}")
+    batter.stats.batting.home_runs += 1
+    pitcher.stats.pitching.home_runs_allowed += 1
     
     while state.display ==  "HR_BASE_CELEBRATION" or state.display == "HR_HOMEIN_CELEBRATION":
         state.refresh()
@@ -537,10 +663,18 @@ if __name__ == "__main__":
                     change_lineup_state(state)
                 case "REMATCH":
                     state.refresh()
+                case _ if state.value not in game.STATE:
+                    print(f"state value is out of range! {state.value}")
+                    game.being_played = False
                 case _:
                     state.refresh()
+                
                     
-        print("Game ended. Deleting Objects")
+        print("Game ended. Printing Stats and Deleting Objects:")
+        if not stats_printed:
+            print_stats(team1)
+            print_stats(team2)
+        
         del(team1)
         del(team2)
         del(game)

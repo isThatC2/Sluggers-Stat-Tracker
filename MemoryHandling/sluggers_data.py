@@ -112,13 +112,15 @@ class Player(Refreshable,Writable):
         self.stats = self.Stats()
         self.team_number = team_nummber
         self.batting_index = batting_index
-        self.position: Position
+        self.position: Position | None = None
+        self.base: Runner | None = None
 
     class Stats:
         def __init__(self):
             self.batting = self.Batting()
             self.pitching = self.Pitching()
             self.fielding = self.Fielding()
+            self.running = self.Running()
             self.positions_played: list[str] = []
             
             
@@ -138,6 +140,7 @@ class Player(Refreshable,Writable):
                 self.star_hits = 0
                 self.flyouts = 0
                 self.ground_outs = 0
+                #self.
                 
                     
         
@@ -168,7 +171,7 @@ class Player(Refreshable,Writable):
                 self.strikes = 0
                 self.balls = 0
                 self.walks = 0
-                self.hit_batsman = 0
+                self.hit_by_pitch = 0
                 self.strikeouts = 0
                 self.hits_allowed = 0
                 self.home_runs_allowed = 0
@@ -193,11 +196,25 @@ class Player(Refreshable,Writable):
                 self.double_plays = 0
                 self.triple_plays = 0
                 self.errors = 0 
+                self.close_plays_won = 0
+                self.close_plays_lost = 0
                 
             @property
             def fielding_chances(self):
                 return self.putouts + self.assists + self.errors
-            
+        
+        class Running:
+            def __init__(self) -> None:
+                self.steals = 0
+                self.caught_stealing = 0
+                self.steal_attempts = 0
+                self.close_plays_won = 0
+                self.close_plays_lost = 0
+                
+            @property
+            def caught_stealing_percentage(self):
+                return self.caught_stealing / self.steal_attempts
+        
         
             
     
@@ -217,7 +234,22 @@ class Position(Refreshable, Writable):
         self.index = Field(index_address, "u8")
         self.position_name: str = name
         self.abbrev:str = abbrev
-        self.player: Player
+        self.player: Player | None = None
+    
+    def refresh_all(self):
+        self.index.refresh()
+        
+class Runner(Refreshable, Writable):
+    def __init__(self, index_address: int, steal_address: int, base_num: int, base: str):
+        self.index = Field(index_address, "s8")
+        self.is_stealing = Field(steal_address, "s8")
+        self.base_num = base_num
+        self.base = base
+        self.player: Player | None = None
+        
+    def refresh_all(self):
+        self.index.refresh()
+        self.is_stealing.refresh()
         
         
 
@@ -316,7 +348,7 @@ class Team(Refreshable, Writable):
         team_number,
         pitching_index_address
     ):
-        self.players = []
+        self.players: list[Player] = []
 
         for i, base in enumerate(base_address_list):
             stamina_address = stamina_address_list[i]
@@ -422,41 +454,27 @@ class Game(Refreshable, Writable):
         self.team2: Team = team2
         self.total_innings = Field(0x80794328, "u8")
         self.current_inning = Field(0x900D5D97, "u8")
-        self.current_outs = Field(0x900D5AA9, "u8")
-        self.current_pitches = Field(0x900D692C, "u8")
-        self.current_balls = Field(0x900D5AA8,"u8")
-        self.current_strikes = Field(0x900D5AA7, "u8")
-        self.outs_this_play = Field(0x900D5E30, "u8")
+        self.outs = Field(0x900D5AA9, "u8")
+        self.pitches = Field(0x900D692C, "u8")
+        self.balls = Field(0x900D5AA8,"u8")
+        self.strikes = Field(0x900D5AA7, "u8")
         self.current_pitcher = self.CurrentPitcher()
         self.current_batter = self.CurrentBatter()
         self.game_state = Field(0x900d5c28, "u8", lookup=self.STATE)
         self.last_state = Field(0x900d5c29, "u8", lookup=self.STATE)
         self.being_played = True
-        self.batter_index = Field(0x900DB5F9, "u8")
-        self.item_chances = self.ItemChances()
-        self.action_lines = Field(0x813206FD, "u8")
-        self.positions = self.DefensePositions(self.team1, self.team2)
+        self.positions = self.DefensePositions()
         self.ball_possession = self.BallPossession()
-        self.buddy_jump_height = Field(0x80625BF8, "u16")
-        self.super_buddy_jump_height = Field(0x80625C08, "u16")
+        self.baserunners = self.Baserunners()
         self.runs_this_inning = 0
         self.runs_this_play = 0
-        self.rng = self.RNG()
         self.match_started = False
         self.game_timer = Field(0x900dfcfc, "u32")
-        self.snap_flag = Field(0x806D1349, "u8")
-        self.pause_flag = Field(0x900D5C2C, "u8")
         self.map = Field(0x811F769D, "u8",lookup=self.MAP)
         self.time_of_day = Field(0x811F769F, "u8",lookup=self.TIME_OF_DAY)
-        self.first_bounce_height = Field(0x80625590 + (20 * self.map.value), "f32")
-        self.later_bounce_height = Field(0x80625594 + (20 * self.map.value), "f32")
-        self.first_bounce_speed = Field(0x80625598 + (20 * self.map.value), "f32")
-        self.later_bounce_speed = Field(0x8062559C + (20 * self.map.value), "f32")
         self.rolling_slowdown = Field(0x806255A0 + (20 * self.map.value), "f32")
         self.batters_this_inning = Field(0x900D5E35, "u8")
         self.ball_was_hit = Field(0x900d6a94, "u8")
-        self.batting_star_normal_modifier = Field(0x80797216, "s8")
-        self.batting_star_special_modifier = Field(0x80797217, "s8")
         self.position_nums = {
             0: self.positions.pitcher,
             1: self.positions.catcher,
@@ -500,20 +518,20 @@ class Game(Refreshable, Writable):
     
     def get_current_batter(self)-> Player:
         while True:
-            Index = self.batter_index.value
+            Index = self.current_batter.index.value
             if Index >= 0 and Index <= 8:
                 break
             else:
-                self.batter_index.refresh()
+                self.current_batter.index.refresh()
         return self.offense_team.players[Index]
 
     def get_current_batter_index(self)-> int:
         while True:
-            Index = self.batter_index.value
+            Index = self.current_batter.index.value
             if Index >= 0 and Index <= 8:
                 break
             else:
-                self.batter_index.refresh()
+                self.current_batter.index.refresh()
         return Index
     
     def get_on_deck_batter(self) -> Player:
@@ -570,8 +588,6 @@ class Game(Refreshable, Writable):
         team = self.get_team_by_player(player)
         return self.get_opposing_team(team)
     
-    def get_safe_name(self, char_name: str) -> str:
-        return char_name.replace(" ", "").replace(".", "").replace("'", "")\
     
     
     def set_positions(self):
@@ -580,7 +596,7 @@ class Game(Refreshable, Writable):
         pos = self.positions
         pos.refresh_all()
         for i in range(9):
-            off_players[i].positions = None
+            off_players[i].position = None
         
         positions_list = [
             pos.pitcher, pos.catcher, pos.first_base, pos.second_base,
@@ -593,9 +609,7 @@ class Game(Refreshable, Writable):
             position.player = player
 
     class DefensePositions(Refreshable, Writable):
-        def __init__(self, team1: Team, team2: Team):
-            self.team1 = team1
-            self.team2 = team2
+        def __init__(self):
             self.pitcher = Position(0x900d9b45, "Pitcher", "P")
             self.catcher = Position(0x900d9e31, "Catcher", "C")
             self.first_base = Position(0x900da11d, "First Base", "1B")
@@ -650,6 +664,69 @@ class Game(Refreshable, Writable):
                 "center_field": self.center_field.index.value,
                 "right_field": self.right_field.index.value,
             }
+    
+    class Baserunners(Refreshable, Writable):
+        def __init__(self):
+            self.first_base = Runner(0x900db7cd, 0x900db93c, 1, "First Base")
+            self.second_base = Runner(0x900db9a1, 0x900dbb0f, 2, "Second Base")
+            self.third_base = Runner(0x900dbb75, 0x900dbce3, 3, "Third Base")
+        
+        def refresh_all(self):
+            runners = [
+                self.first_base, self.second_base, self.third_base
+            ]
+
+            for runner in runners:
+               runner.index.refresh()
+               runner.is_stealing.refresh()
+               
+    def get_player_on_base(self, base: int):
+        if base < 0 or base > 3:
+            raise ValueError(f"Invalid base value: {base}")
+
+        if base == 1:
+            target = self.baserunners.first_base
+        elif base == 2:
+            target = self.baserunners.second_base
+        else:
+            target = self.baserunners.third_base
+        
+        if target.player is not None:
+            return target.player
+        elif target.index.value >= 0:
+            return self.offense_team.players[target.index.value]
+        
+        return None
+
+    def set_baserunners(self):
+        def_players = self.defense_team.players
+        off_players = self.offense_team.players
+        baserun = self.baserunners
+        baserun.refresh_all()
+        
+        br_list = [baserun.first_base, baserun.second_base, baserun.third_base]
+        
+        for player in def_players:
+            player.base = None
+        
+        for br in br_list:
+            if br.index.value >= 0 and br.index.value <= 8:
+                br.player = off_players[br.index.value]
+                off_players[br.index.value].base = br
+            elif br.index.value < 0:
+                if br.player is not None:
+                    br.player.base = None
+                    br.player = None
+            else:
+                raise ValueError(f"Baserunner index outside of range: {br.index.value}")
+        
+            
+                
+                
+        
+        
+        
+        
         
     class BallPossession(Refreshable,Writable):
         def __init__(self) -> None:
@@ -676,96 +753,47 @@ class Game(Refreshable, Writable):
                 return pos.player
         else:
             return None
+    
+    class ThisPitch(Refreshable, Writable):
+        def __init__(self):
+            self.runs = 0
+            self.outs = Field(0x900D5E30, "u8")
+            self.out_runner_1 = Field(0x900d5aa0, "u16")
+            self.out_runner_2 = Field(0x900d5aa2, "u16")
+            self.out_runner_3 = Field(0x900d5aa4, "u16")
+            self.fair_or_foul = Field(0x900D9516, "u16")
             
+        
+        def get_current_out_runner(self):
+            self.outs.refresh()
+            if self.outs.value == 0:
+                return self.out_runner_1
+            elif self.outs.value == 1:
+                return self.out_runner_2
+            elif self.outs.value == 2: 
+                return self.out_runner_3
+            else:
+                return None
+            
+                    
+        
     class CurrentPitcher(Refreshable, Writable):
         def __init__(self):
             self.index = Field(0x900d9b45, "u8")
             self.id = Field(0x900d9b47, "u8", lookup = CHAR_ID_TO_NAME)
-            self.curve_pitch_speed = Field(0x900D691C, "u16")
-            self.charge_pitch_speed = Field(0x900D691E, "u16")
-            self.curve = Field(0x900D6920, "u16")
             self.captain_star_pitch = Field(0x900D6929, "u8")
-            self.pitch_timer = Field(0x900DFCFC, "u16")
         
-        def getCurrentPitcherName(self):
+        def get_current_pitcher_name(self):
             return self.id.display
 
 
     class CurrentBatter(Refreshable, Writable):
         def __init__(self):
             self.id = Field(0x900d69ef, "u8", lookup = CHAR_ID_TO_NAME)
+            self.index = Field(0x900DB5F9, "u8")
             
-            self.slap_contact_size = Field(0x900D6A64, "u16")
-            self.slap_contact_size_pp = Field(0x900D6A72, "u16")
-            
-            self.charge_contact_size = Field(0x900D6A66, "u16")
-            self.charge_contact_size_pp = Field(0x900D6A74, "u16")
-            
-            self.slap_hit_power = Field(0x900D6A68, "u16")
-            self.slap_hit_power_pp = Field(0x900D6A6E, "u16")
-            
-            self.charge_hit_power = Field(0x900D6A6A, "u16")
-            self.charge_hit_power_pp = Field(0x900D6A70, "u16")
-            
-            self.bunting = Field(0x900D6A6C, "u16")
-            
-        def getCurrentBatterName(self):
+        def get_current_batter_name(self):
             return self.id.display
-        
-        
-    
-            
-
-
-    class ItemGroup(Refreshable, Writable):
-        """Represents a single phase (early/middle/late) of item chances."""
-        def __init__(self, base_address: int):
-            self.shell = Field(base_address + 0, "u8")
-            self.fire = Field(base_address + 1, "u8")
-            self.bomb = Field(base_address + 2, "u8")
-            self.pow = Field(base_address + 3, "u8")
-            self.banana = Field(base_address + 4, "u8")
-            self.boo = Field(base_address + 5, "u8")
-
-
-    class ItemChances(Refreshable, Writable):
-        """Top-level container for all item chance groups."""
-        def __init__(self):
-            base_addr = 0x80630FB0
-            self.early  = Game.ItemGroup(base_addr + 0)   # 0x80630FB0
-            self.middle = Game.ItemGroup(base_addr + 6)   # 0x80630FB6
-            self.late   = Game.ItemGroup(base_addr + 12)  # 0x80630FBC
-            
-        def get_current_item_group(self, current_inning: int, total_innings: int, full_game_innings: int = 9):
-            """
-            full_game_innings: canonical full-game length (default 9).
-            late keeps its full canonical size (ceil(full_game_innings/3)).
-            middle keeps its canonical size next, capped by remaining innings.
-            early gets the rest (may be 0).
-            """
-            # canonical sizes (based on full_game_innings)
-            canonical_third = math.ceil(full_game_innings / 3)
-            late_size = min(canonical_third, total_innings)
-            remaining_after_late = total_innings - late_size
-
-            middle_size = min(canonical_third, remaining_after_late)
-            early_size = total_innings - late_size - middle_size
-
-            # compute start innings (1-indexed)
-            late_start = total_innings - late_size + 1
-            middle_start = late_start - middle_size
-
-            if current_inning >= late_start:
-                return self.late
-            elif current_inning >= middle_start:
-                return self.middle
-            else:
-                return self.early
-    
-    class RNG(Refreshable, Writable):
-        def __init__(self):
-            self.per_pitch = Field(0x806D12B7, "u8") # 0-100 rng for per-pitch calculations
-            self.per_at_bat = Field(0x806D12B6, "u8") # 0-100 rng for per-at-bat calculations
                     
     
     
@@ -785,6 +813,7 @@ class Game(Refreshable, Writable):
         0x07: "Daisy Cruiser",
         0x08: "Bowser Jr. Playroom"
     }
+    
     STATE= {
     0x00: "LOAD",
     0x01: "BATTING",
