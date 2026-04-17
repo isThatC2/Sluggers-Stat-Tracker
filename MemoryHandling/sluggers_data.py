@@ -101,7 +101,15 @@ CHAR_ID_TO_NAME = {
     0x38:"Funky Kong", 0x39:"Tiny Kong", 0x3A:"Kritter", 0x3B:"Blue Kritter",
     0x3C:"Red Kritter", 0x3D:"Brown Kritter", 0x3E:"King K. Rool", 0x3F:"Baby Peach",
     0x40:"Baby Daisy", 0x41:"Baby DK", 0x42:"Red Yoshi", 0x43:"Blue Yoshi",
-    0x44:"Yellow Yoshi", 0x45:"Light Blue Yoshi", 0x46:"Pink Yoshi",
+    0x44:"Yellow Yoshi", 0x45:"Light Blue Yoshi", 0x46:"Pink Yoshi", 0x4D: "Red Mii (M)",
+    0x4E: "Orange Mii (M)", 0x4F: "Yellow Mii (M)", 0x50: "Light Green Mii (M)",
+    0x51: "Green Mii (M)", 0x52: "Blue Mii (M)", 0x53: "Light Blue Mii (M)",
+    0x54: "Pink Mii (M)", 0x55: "Purple Mii (M)", 0x56: "Brown Mii (M)",
+    0x57: "White Mii (M)", 0x58: "Black Mii (M)", 0x59: "Red Mii (F)",
+    0x5A: "Orange Mii (F)", 0x5B: "Yellow Mii (F)", 0x5C: "Light Green Mii (F)",
+    0x5D: "Green Mii (F)", 0x5E: "Blue Mii (F)", 0x5F: " Light Blue Mii (F)", 
+    0x60: "Pink Mii (F)", 0x61: "Purple Mii (F)", 0x62: "Brown Mii (F)",
+    0x63: "White Mii (F)", 0x64: "Black Mii (F)"
 }
         
 class Player(Refreshable,Writable):
@@ -133,6 +141,7 @@ class Player(Refreshable,Writable):
                 self.rbi = 0
                 self.walks = 0
                 self.home_runs = 0
+                self.inside_the_park_home_runs = 0
                 self.strikeouts = 0
                 self.hit_by_pitch = 0
                 self.star_hits = 0
@@ -140,6 +149,7 @@ class Player(Refreshable,Writable):
                 self.ground_outs = 0
                 self.foul_balls = 0
                 self.plate_appearances = 0
+                self.sac_flys = 0
                 
                     
         
@@ -169,9 +179,10 @@ class Player(Refreshable,Writable):
                 self.strikes = 0
                 self.balls = 0
                 self.walks = 0
-                self.hit_by_pitch = 0
+                self.bean_balls = 0
                 self.strikeouts = 0
                 self.hits_allowed = 0
+                self.runs_allowed = 0
                 self.home_runs_allowed = 0
                 self.batters_faced = 0
                 self.earned_runs = 0
@@ -180,24 +191,45 @@ class Player(Refreshable,Writable):
                 self.star_pitches = 0
                 self.pickoffs = 0
                 self.pickoff_attempts = 0
+                self.inherited_runs = 0
             
             @property
             def innings_pitched(self):
                 return self.outs_pitched / 3
             
             @property
-            def era(self):
-                return (self.earned_runs / self.innings_pitched) * 9 if self.innings_pitched > 0 else 0.0
-        
+            def era_per_9(self):
+                if self.earned_runs > 0 and self.innings_pitched == 0:
+                    return float('inf')
+                
+                return (self.earned_runs * 9) / self.innings_pitched if self.innings_pitched > 0 else 0.0
+            
+            @property
+            def era_per_7(self):
+                if self.earned_runs > 0 and self.innings_pitched == 0:
+                    return float('inf')
+                
+                return (self.earned_runs * 7) / self.innings_pitched if self.innings_pitched > 0 else 0.0
+                
+            
+            @property
+            def whip(self):
+                if (self.walks + self.hits_allowed) > 0 and self.innings_pitched == 0:
+                    return float('inf')
+                
+                return (self.walks + self.hits_allowed) / self.innings_pitched if self.innings_pitched > 0 else 0.0
+
         class Fielding:
             def __init__(self) -> None:
                 self.assists = 0
                 self.putouts = 0
+                self.throwouts = 0
+                self.buddy_jump_outs = 0
                 self.double_plays = 0
                 self.triple_plays = 0
                 self.errors = 0 
-                self.close_plays_won = 0
-                self.close_plays_lost = 0
+                self.close_plays_won = 0 # No Close Play Stats are currently being tracked.
+                self.close_plays_lost = 0  # No Close Play Stats are currently being tracked.
                 
             @property
             def fielding_chances(self):
@@ -205,11 +237,11 @@ class Player(Refreshable,Writable):
         
         class Running:
             def __init__(self) -> None:
-                self.steals = 0
+                self.stolen_bases = 0
                 self.caught_stealing = 0
                 self.steal_attempts = 0
-                self.close_plays_won = 0
-                self.close_plays_lost = 0
+                self.close_plays_won = 0  # No Close Play Stats are currently being tracked.
+                self.close_plays_lost = 0  # No Close Play Stats are currently being tracked.
                 self.runs = 0
                 
             @property
@@ -355,7 +387,6 @@ class Team(Refreshable, Writable):
         batting_fielding_address,
         team_number,
         pitching_index_address,
-        hits_address
     ):
         self.players: list[Player] = []
 
@@ -384,7 +415,10 @@ class Team(Refreshable, Writable):
         self.pitching_index = Field(pitching_index_address, "u8")
         self.position_indexes = self.PositionIndexes()
         self.batting_index  = 0  # Current batter index in lineup (0-8)
-        self.hits = Field(hits_address, "u8")
+        self.hits = Field(0xFF, "u8")  # Placeholder, will be set to actual address in Game.__init__
+        self.starting_lineup_set = False
+        self.starting_lineup: dict[Player, str] = {}
+        self.pitcher_order: list[Player] = []
 
        
         
@@ -494,7 +528,7 @@ class Game(Refreshable, Writable):
         self.game_state = Field(0x900d5c28, "u8", lookup=self.STATE)
         self.last_state = Field(0x900d5c29, "u8", lookup=self.STATE)
         self.being_played = True
-        self.positions = self.DefensePositions()
+        self.def_positions = self.DefensePositions()
         self.ball_possession = self.BallPossession()
         self.baserunners = self.Baserunners()
         self.this_pitch = self.ThisPitch()
@@ -509,17 +543,20 @@ class Game(Refreshable, Writable):
         self.ball_was_hit = Field(0x900d6a94, "u8")
         self.inning_half = Field(0x900D5E25, "u8")
         self.in_replay = Field(0x91374CA7, "u8")
+        self.left_buddy_jump_flag = Field(0x900DAED2, "u8")
+        self.center_buddy_jump_flag = Field(0x900DB1BE, "u8")
+        self.right_buddy_jump_flag = Field(0x900DB4AA, "u8")
         self.star_costs = self.StarCosts()
         self.position_nums = {
-            0: self.positions.pitcher,
-            1: self.positions.catcher,
-            2: self.positions.first_base,
-            3: self.positions.second_base,
-            4: self.positions.third_base,
-            5: self.positions.shortstop,
-            6: self.positions.left_field,
-            7: self.positions.center_field,
-            8: self.positions.right_field,
+            0: self.def_positions.pitcher,
+            1: self.def_positions.catcher,
+            2: self.def_positions.first_base,
+            3: self.def_positions.second_base,
+            4: self.def_positions.third_base,
+            5: self.def_positions.shortstop,
+            6: self.def_positions.left_field,
+            7: self.def_positions.center_field,
+            8: self.def_positions.right_field,
         }
 
 
@@ -625,10 +662,10 @@ class Game(Refreshable, Writable):
     
     
     
-    def set_positions(self):
+    def set_def_positions(self):
         def_players = self.defense_team.players
         off_players = self.offense_team.players
-        pos = self.positions
+        pos = self.def_positions
         
         pos.refresh_all()
         for i in range(9):
@@ -675,23 +712,66 @@ class Game(Refreshable, Writable):
 
             for position in positions:
                 position.index.refresh()
+            
+        
+        def get_all_position_players(self) -> dict[str, Player]:
+            self.refresh_all()
+            return {
+                "P": self.pitcher.player,
+                "C": self.catcher.player,
+                "1B": self.first_base.player,
+                "2B": self.second_base.player,
+                "3B": self.third_base.player,
+                "SS": self.shortstop.player,
+                "LF": self.left_field.player,
+                "CF": self.center_field.player,
+                "RF": self.right_field.player,
+            }
+            
+        def get_all_players_at_positions(self) -> dict[Player, str]:
+            self.refresh_all()
+            return {
+                self.pitcher.player: "P",
+                self.catcher.player: "C",
+                self.first_base.player: "1B",
+                self.second_base.player: "2B",
+                self.third_base.player: "3B",
+                self.shortstop.player: "SS",
+                self.left_field.player: "LF",
+                self.center_field.player: "CF",
+                self.right_field.player: "RF"
+            }
+
+        def get_all_position_players_list(self) -> list[Player]:
+            self.refresh_all()
+            return [
+                self.pitcher.player,
+                self.catcher.player,
+                self.first_base.player,
+                self.second_base.player,
+                self.third_base.player,
+                self.shortstop.player,
+                self.left_field.player,
+                self.center_field.player,
+                self.right_field.player,
+            ]
 
         
         
         def get_position_index(self, position_name: str) -> int:
             self.refresh_all()
             position_map = {
-                "pitcher": self.pitcher,
-                "catcher": self.catcher,
-                "first_base": self.first_base,
-                "second_base": self.second_base,
-                "third_base": self.third_base,
-                "shortstop": self.shortstop,
-                "left_field": self.left_field,
-                "center_field": self.center_field,
-                "right_field": self.right_field,
+                "P": self.pitcher,
+                "C": self.catcher,
+                "1B": self.first_base,
+                "2B": self.second_base,
+                "3B": self.third_base,
+                "SS": self.shortstop,
+                "LF": self.left_field,
+                "CF": self.center_field,
+                "RF": self.right_field,
             }
-            position = position_map.get(position_name.lower())
+            position = position_map.get(position_name.upper())
             if position is None:
                 raise ValueError(f"Invalid position name: {position_name}")
             return position.index.value
@@ -700,17 +780,19 @@ class Game(Refreshable, Writable):
         def get_all_position_indexes(self) -> dict:
             self.refresh_all()
             return {
-                "pitcher": self.pitcher.index.value,
-                "catcher": self.catcher.index.value,
-                "first_base": self.first_base.index.value,
-                "second_base": self.second_base.index.value,
-                "third_base": self.third_base.index.value,
-                "shortstop": self.shortstop.index.value,
-                "left_field": self.left_field.index.value,
-                "center_field": self.center_field.index.value,
-                "right_field": self.right_field.index.value,
+                "P": self.pitcher.index.value,
+                "C": self.catcher.index.value,
+                "1B": self.first_base.index.value,
+                "2B": self.second_base.index.value,
+                "3B": self.third_base.index.value,
+                "SS": self.shortstop.index.value,
+                "LF": self.left_field.index.value,
+                "CF": self.center_field.index.value,
+                "RF": self.right_field.index.value,
             }
-    
+        
+
+
     class Baserunners(Refreshable, Writable):
         def __init__(self):
             self.first_base = Runner(0x900db7cd, 0x900db93c, 1, "First Base")
@@ -765,15 +847,7 @@ class Game(Refreshable, Writable):
                     br.player = NO_PLAYER
             else:
                 raise ValueError(f"Baserunner index outside of range: {br.index.value}")
-        
-            
-                
-                
-        
-        
-        
-        
-        
+ 
     class BallPossession(Refreshable,Writable):
         def __init__(self) -> None:
             self.last_to_have_ball_index = Field(0x900d5056, "u8")
@@ -802,10 +876,12 @@ class Game(Refreshable, Writable):
         def __init__(self):
             self.runs = Field(0x900D5E30, "u8")
             self.outs = Field(0x900D5E31, "u8")
+            self.bean_ball_flag = Field(0x900d6a95, "s8")
             self.out_runner_1 = Field(0x900d5aa0, "s16")
             self.out_runner_2 = Field(0x900d5aa2, "s16")
             self.out_runner_3 = Field(0x900d5aa4, "s16")
             self.fair_or_foul = Field(0x900D9516, "s16")
+            self.num_bases_ran = Field(0x900D66D2, "s8")
             
         
         def get_current_out_runner(self):
@@ -897,10 +973,10 @@ class Game(Refreshable, Writable):
     0x1A: "COIN_TOSS",
     0x1B: "WIN_ANIMATION",
     0x1C: "UNKNOWN_STATE_1C",
-    0x1D: "SWAP_PITCHER",
+    0x1D: "CHANGE_LINEUP",
     0x1E: "CONTROLLER_TYPE_SCREEN",
     0x1F: "CHALLENGE_MODE_ITEMS",
-    0x20: "RELOAD_GAME",
+    0x20: "REMATCH",
 }
     
     
