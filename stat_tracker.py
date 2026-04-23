@@ -314,8 +314,6 @@ def __set_starting_lineup(game: Game, team: Team):
     
     lineup = game.def_positions.get_all_players_at_positions()
     
-    for key in lineup:
-        print(key.name, lineup[key])
     
     team.starting_lineup = lineup
     log.debug(f"{team.short_name} Starting Lineup Set!")
