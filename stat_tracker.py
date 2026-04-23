@@ -10,7 +10,6 @@ from enum import Enum
 # Used to track the last pitch's ID that was processed to avoid processing the same pitch multiple times during replays.
 last_pitch_id_processed = -1
 
-
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -71,6 +70,7 @@ class MatchContext:
         self.defense_lineup: dict[Player, str] = {}
         self.offense_team_score: int = 0
         self.num_bases_ran: int = 0
+        self.potential_rbis: int = 0
         self.out_contributors: list[Player] = []
         self.ball_is_being_held: bool = False
         self.is_replay: bool = False
@@ -83,10 +83,13 @@ class MatchContext:
         self.runs_earned_this_inning: bool = True
         self.at_bat_eligible: bool = True
         self.home_run_flag: bool = False
+        self.inside_the_park_hr_flag: bool = False
         self.sacrifice_flag: bool = False
         self.bean_ball_flag: bool = False
         self.pickoff_attempt_flag: bool = False
         self.pitch_thrown_flag: bool = False
+        self.double_play_flag: bool = False
+        self.triple_play_flag: bool = False
 
 
 # Holds a snapshot of the game state at the time of each pitch. Used to check for changes that can't be tracked live during the pitch and update stats accordingly at the start of the next pitch.
@@ -97,7 +100,8 @@ class PitchSnapshot:
                  offense_team: Team = NO_TEAM, defense_team: Team = NO_TEAM,
                  num_bases_ran: int = 0, offense_hits: int = 0, offense_score: int = 0,
                  runs_this_pitch: int = 0, outs_this_pitch: int = 0, ball_hit_flag: bool = False,
-                 home_run_flag: bool = False, sacrifice_flag: bool = False, bean_ball_flag: bool = False, pitch_id: int = 0):
+                 home_run_flag: bool = False, sacrifice_flag: bool = False, bean_ball_flag: bool = False, double_play_flag: bool = False,
+                 triple_play_flag:bool = False, pitch_id: int = 0, potential_rbis: int = 0, inside_the_park_hr_flag: bool = False):
         self.balls = balls
         self.strikes = strikes
         self.outs = outs
@@ -121,6 +125,10 @@ class PitchSnapshot:
         self.home_run_flag = home_run_flag
         self.sacrifice_flag = sacrifice_flag
         self.bean_ball_flag = bean_ball_flag
+        self.potential_rbis = potential_rbis
+        self.double_play_flag = double_play_flag
+        self.triple_play_flag = triple_play_flag
+        self.inside_the_park_hr_flag = inside_the_park_hr_flag
     
     
 
@@ -188,6 +196,8 @@ def _refresh_game_values(game: Game, team1: Team, team2: Team):
     game.left_buddy_jump_flag.refresh()
     game.center_buddy_jump_flag.refresh()
     game.right_buddy_jump_flag.refresh()
+    game.baserunners.refresh_all()
+    game.home_run_flag.refresh()
 
 def _update_match_context_values(game: Game, team1: Team, team2: Team, mc: MatchContext):
     mc.team1_score = team1.score.value
@@ -202,6 +212,10 @@ def _update_match_context_values(game: Game, team1: Team, team2: Team, mc: Match
     mc.offense_team_score = game.offense_team.score.value
     mc.ball_is_being_held = game.ball_possession.current_ball_holder_index.value >= 0
     mc.num_bases_ran = game.this_pitch.num_bases_ran.value
+    if game.home_run_flag.value == 1:
+        mc.home_run_flag = True
+    else:
+        mc.home_run_flag = False
 
 def _make_pitch_snapshot(mc: MatchContext) -> PitchSnapshot:
     return PitchSnapshot(
@@ -226,7 +240,9 @@ def _make_pitch_snapshot(mc: MatchContext) -> PitchSnapshot:
         ball_hit_flag=mc.ball_hit_flag,
         home_run_flag=mc.home_run_flag,
         sacrifice_flag=mc.sacrifice_flag,
-        bean_ball_flag=mc.bean_ball_flag
+        bean_ball_flag=mc.bean_ball_flag,
+        potential_rbis=mc.potential_rbis,
+        inside_the_park_hr_flag=mc.inside_the_park_hr_flag
     )
     
 
@@ -252,7 +268,7 @@ def output_stats_to_excel(game: Game):
     outputter.output_game(game)
     
 
-def _assign_score_and_meter_fields(game):
+def _assign_score_and_meter_fields(game: Game):
     """Correctly assigns score and meter fields to home and away teams at match-start"""
     game.inning_half.refresh()
 
@@ -272,6 +288,8 @@ def _assign_score_and_meter_fields(game):
     a.hits= Field(0x900d5dcd, "u8")
     b.hits = Field(0x900d5de7, "u8")
     
+    game.away_team = a
+    game.home_team = b
     
 
 def _fill_baserunner_list(game: Game, mc: MatchContext):
@@ -291,7 +309,14 @@ def _fill_baserunner_list(game: Game, mc: MatchContext):
 def __set_starting_lineup(game: Game, team: Team):
     """Creates a dict of the players at each defensive position for a given team at the start of the match"""
     
+    game.def_positions.refresh_all()
+    game.set_def_positions()
+    
     lineup = game.def_positions.get_all_players_at_positions()
+    
+    for key in lineup:
+        print(key.name, lineup[key])
+    
     team.starting_lineup = lineup
     log.debug(f"{team.short_name} Starting Lineup Set!")
     team.starting_lineup_set = True
@@ -351,12 +376,12 @@ def _check_count_changes(game: Game, pitcher: Player, batter: Player, mc: MatchC
 
 def _check_if_steal_attempt(game: Game, runner: Player, base_num: int, mc: MatchContext):
     """Checks if a runner is attempting to steal a base"""
-    if runner.base is None:
+    if runner.baserunner_info is None:
         return
     
-    runner.base.refresh_all()
-    if runner.base.is_stealing.value != 0:
-        steal_entry = (runner, runner.base.base_num)
+    runner.baserunner_info.refresh_all()
+    if runner.baserunner_info.is_stealing.value != 0 and not mc.ball_hit_flag:
+        steal_entry = (runner, runner.baserunner_info.base_num)
         if steal_entry not in mc.steal_attempters:
             mc.steal_attempters.append(steal_entry)
             runner.stats.running.steal_attempts += 1
@@ -373,11 +398,11 @@ def _check_if_steal_success(game: Game, runner: Player, base_num: int, mc: Match
         index = mc.steal_attempters.index(steal_entry)
         player, steal_base_num = mc.steal_attempters[index]
         
-        if runner.base is None:
+        if runner.baserunner_info is None:
             log.warning(f"{runner.name} may have scored or gotten out. functionality not there yet")
             return
         
-        if player is runner and (runner.base.base_num > steal_base_num) or player in mc.runners_scored_this_pitch:
+        if player is runner and (runner.baserunner_info.base_num > steal_base_num) or player in mc.runners_scored_this_pitch:
             log.info(f"{runner.name} stole a base!")
             runner.stats.running.stolen_bases += 1
 
@@ -442,33 +467,44 @@ def _process_last_pitch_snapshot(game: Game, mc: MatchContext, last_pitch: Pitch
         print(f"Last Pitch already processed")
         return
     
+    
+    if last_pitch.inside_the_park_hr_flag and not last_pitch.home_run_flag:
+        last_pitch.batter.stats.batting.home_runs += 1
+        last_pitch.batter.stats.batting.inside_the_park_home_runs += 1
+        last_pitch.pitcher.stats.pitching.home_runs_allowed += 1
+        
+        log.debug(f"{last_pitch.batter.name} recorded an inside the park home run!")
+    
+    
     #hit_recorded = _check_if_hit_was_recorded(game, game.team1, game.team2, mc)
     
     if last_pitch.offense_hits < (mc.team1_hits if last_pitch.offense_team is game.team1 else mc.team2_hits):
-        log.debug(f"{last_pitch.batter.name} recorded a hit!")
+        #log.debug(f"{last_pitch.batter.name} recorded a hit!")
         last_pitch.batter.stats.batting.hits += 1
         last_pitch.pitcher.stats.pitching.hits_allowed += 1
-        log.debug(f"{last_pitch.batter.name} has {last_pitch.batter.stats.batting.hits} hits!")
+       #log.debug(f"{last_pitch.batter.name} has {last_pitch.batter.stats.batting.hits} hits!")
         log.debug(f"{last_pitch.pitcher.name} has allowed {last_pitch.pitcher.stats.pitching.hits_allowed} hits!")
+        
+        if last_pitch.potential_rbis > 0:
+            if last_pitch.double_play_flag or last_pitch.triple_play_flag:
+                log.debug(f"{last_pitch.batter.name} will not be credited with RBIs due to hitting into multiple outs.")
+            else:
+                last_pitch.batter.stats.batting.rbi += last_pitch.potential_rbis
+                log.info(f"{last_pitch.batter.name} recorded {last_pitch.potential_rbis} RBI!")
+            
+        
         
         if last_pitch.num_bases_ran == 3:
             last_pitch.batter.stats.batting.triples += 1
-            log.debug(f"{last_pitch.batter.name} recorded their {last_pitch.batter.stats.batting.triples} triples!")
+            log.debug(f"{last_pitch.batter.name} recorded a triple!")
             
         elif last_pitch.num_bases_ran == 2:
             last_pitch.batter.stats.batting.doubles += 1
-            log.debug(f"{last_pitch.batter.name} has {last_pitch.batter.stats.batting.doubles} doubles!")
+            log.debug(f"{last_pitch.batter.name} recorded a double!")
         elif last_pitch.num_bases_ran == 1:
             last_pitch.batter.stats.batting.singles += 1
-            log.debug(f"{last_pitch.batter.name} has {last_pitch.batter.stats.batting.singles} singles!")
-            
-        elif last_pitch.num_bases_ran == 4 and not last_pitch.home_run_flag:
-            
-            last_pitch.batter.stats.batting.home_runs += 1
-            last_pitch.batter.stats.batting.inside_the_park_home_runs += 1
-            last_pitch.pitcher.stats.pitching.home_runs_allowed += 1
-            
-            log.debug(f"{last_pitch.batter.name} recorded an inside the park home run!")
+            log.debug(f"{last_pitch.batter.name} recorded a single!")
+
     
 
 
@@ -500,10 +536,11 @@ def _check_ball_status_change(ball_status: BallPossessionStatus, last_ball_statu
     if last_ball_status != ball_status:
         last_ball_holder = game.get_last_player_to_touch_ball()
         if ball_status == BallPossessionStatus.HELD:
-            while current_ball_holder == NO_PLAYER and get_current_ball_holder_refreshes < 100:
+            while current_ball_holder == NO_PLAYER and get_current_ball_holder_refreshes < 15:
                 game.ball_possession.refresh_all()
                 current_ball_holder = game.get_current_ball_holder()
                 get_current_ball_holder_refreshes += 1
+                time.sleep(0.02)
             
             if current_ball_holder is NO_PLAYER:
                 log.warning(f"Ball possession status changed to HELD but no current ball holder found after refreshing. This may be a misread or a very fast change. Last ball holder: {last_ball_holder.name if last_ball_holder is not NO_PLAYER else 'None'}")
@@ -549,8 +586,11 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
     match game.this_pitch.outs.value:
         case 2:
             log.info("Double play!")
+            mc.double_play_flag = True
         case 3:
             log.info("Triple play!")
+            mc.double_play_flag = False
+            mc.triple_play_flag = True
     
     
     #log.debug(f"There are currently {game.this_pitch.outs.value} outs recorded for this pitch.")
@@ -564,16 +604,34 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
     # Person holding ball occasionally updates after the out is recorded.
     # Keep refreshing until it does update.
     
-    while last_holder is NO_PLAYER or out_runner is NO_PLAYER:
+    ball_holder_retries = 0
+    out_runner_retries = 0
+    
+    max_ball_holder_attempts = 10
+    max_out_runner_attempts = 10
+    while last_holder is NO_PLAYER and ball_holder_retries < max_ball_holder_attempts:
         last_holder = game.get_current_ball_holder()
-        out_runner_id.refresh()
-        out_runner = mc.baserunners[out_runner_id.value]
         if last_holder is NO_PLAYER:
             log.debug(f"Waiting for LAST HOLDER to update for out... last holder: {last_holder.name if last_holder is not NO_PLAYER else 'None'}, out runner ID: {out_runner_id.value}, out runner: {out_runner.name if out_runner is not NO_PLAYER else 'None'}")
+        else:
+            break
+        time.sleep(0.02)
+        ball_holder_retries += 1
+        
+    while out_runner is NO_PLAYER and out_runner_retries < max_out_runner_attempts:
+        out_runner_id.refresh()
+        out_runner = mc.baserunners[out_runner_id.value]
+        if out_runner_id == 0:
+            out_runner = mc.batter
         if out_runner is NO_PLAYER:
             log.debug(f"Waiting for OUT RUNNER to update for out.. last holder: {last_holder.name if last_holder is not NO_PLAYER else 'None'}, out runner ID: {out_runner_id.value}, out runner: {out_runner.name if out_runner is not NO_PLAYER else 'None'}")
+        else:
+            break
+        time.sleep(0.02)
+        out_runner_retries +=1    
 
-    log.info(f"{last_holder.name} got {out_runner.name} out!")
+    
+    log.info(f"{last_holder.name} put {out_runner.name} out!")
     
     # Checks for if out can be classified as a specific type of out and awards stats accordingly.
     if last_holder is mc.buddy_jumper:
@@ -598,7 +656,7 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
     
     for player in mc.fielders_touched_ball_this_pitch:
         if player is not last_holder and player is not NO_PLAYER:
-            print(f"{player.name} recorded an assist!")
+            log.info(f"{player.name} recorded an assist!")
             player.stats.fielding.assists += 1
             if player not in mc.out_contributors:
                 mc.out_contributors.append(player)
@@ -622,7 +680,7 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
     inher_runner, old_pitcher = next((left_runner for left_runner in mc.inherited_baserunners if out_runner in left_runner), (None, mc.pitcher))
     if inher_runner is not None:
         mc.inherited_baserunners.remove((inher_runner, old_pitcher))
-        print(f"({inher_runner.name}, {old_pitcher.name}) removed from inherited runners list")
+        #print(f"({inher_runner.name}, {old_pitcher.name}) removed from inherited runners list")
 
 
 def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool):
@@ -634,47 +692,84 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
     game.runs_this_inning += score_change
     
     if mc.ball_hit_flag:
-        mc.batter.stats.batting.rbi += score_change
-        log.info(f"{mc.batter.name} drove in {score_change} run(s)! That's {mc.batter.stats.batting.rbi} RBIs!")
+        mc.potential_rbis += score_change
     
-    if sacrifice_possible:
-        if not mc.sacrifice_flag:
-            mc.batter.stats.batting.sac_flys += 1
+    if sacrifice_possible and not mc.sacrifice_flag:
+        mc.batter.stats.batting.sac_flys += 1
         mc.sacrifice_flag = True
         log.info(f"{mc.batter.name} recorded a sacrifice fly!")
         mc.at_bat_eligible = False
-        
-    for i in range(0, score_change):
-        game.this_pitch.num_bases_ran.refresh()
-        if game.this_pitch.num_bases_ran.value == 4 and mc.batter not in mc.runners_scored_this_pitch:
-            scorer = mc.batter
-        else:
+    
+    # Repeat process of individual run tracking for every run scored this tick
+    for _ in range(0, score_change):
+        scorer = NO_PLAYER
+        retries = 0
+        max_run_scorer_check_refreshes = 40
+        while retries < max_run_scorer_check_refreshes:
+            game.home_run_flag.refresh()
+            if game.home_run_flag.value == 1:
+                break
+            
+            for runner in reversed(mc.baserunners):
+                if runner is NO_PLAYER:
+                    continue
+                if runner.baserunner_info is None and runner is not mc.batter:
+                    continue
+                
+                
+                if runner.baserunner_info is not None:
+                    runner.baserunner_info.bases_ran.refresh()
+                    bases_ran = runner.baserunner_info.bases_ran.value
+                    if bases_ran == 4 and runner not in mc.runners_scored_this_pitch:
+                        scorer = runner
+                        break 
+                else:
+                    if runner is mc.batter:
+                        game.current_batter.bases_ran.refresh()
+                        bases_ran = game.current_batter.bases_ran.value
+                        if bases_ran == 4 and runner not in mc.runners_scored_this_pitch:
+                            scorer = runner
+                            mc.inside_the_park_hr_flag = True
+                            break
+                        
+            if scorer is not NO_PLAYER:
+                break 
+            retries += 1
+            time.sleep(0.02) #Wait roughly a frame
+
+        if scorer is NO_PLAYER:
+            #log.debug(f"No runner seemed to reach home plate. Crediting run to runner at farthest base.")
+            br = mc.baserunners
+            #print(f"{br[0].name} - {game.current_batter.bases_ran.value}")
+            #print(f"{br[1].name} - {br[1].baserunner_info.bases_ran.value if br[1].baserunner_info is not None else "None"}")
+            #print(f"{br[2].name} - {br[2].baserunner_info.bases_ran.value if br[2].baserunner_info is not None else "None"}")
+            #print(f"{br[3].name} - {br[3].baserunner_info.bases_ran.value if br[3].baserunner_info is not None else "None"}")
             scorer = next((runner for runner in reversed(mc.baserunners) if runner is not NO_PLAYER and runner not in mc.runners_scored_this_pitch), NO_PLAYER)
             
         if scorer is not NO_PLAYER:
             mc.runners_scored_this_pitch.append(scorer)
-            log.info(f"{scorer.name} scored!")
+            log.info(f"{scorer.name} got a run!")
             scorer.stats.running.runs += 1
-            log.debug(f"{scorer.name} has now scored {scorer.stats.running.runs} runs.")
-            if scorer.base is not None:
-                mc.baserunners[scorer.base.base_num] = NO_PLAYER
+            #log.debug(f"{scorer.name} has now scored {scorer.stats.running.runs} runs.")
+            if scorer.baserunner_info is not None:
+                mc.baserunners[scorer.baserunner_info.base_num] = NO_PLAYER
         else:
-            log.warning("Failed to identify scorer on score change.")
-    
-    inher_runner, pitcher = next((left_runner for left_runner in mc.inherited_baserunners if scorer in left_runner), (None, mc.pitcher))
+            log.warning("Failed to identify run scorer")
+        
+        inher_runner, pitcher = next((left_runner for left_runner in mc.inherited_baserunners if scorer in left_runner), (None, mc.pitcher))
 
-    if pitcher != mc.pitcher:
-        log.info(f"{mc.pitcher.name} inherited this runner from {pitcher.name}. {pitcher.name} will be charged any earned runs.")
-        mc.pitcher.stats.pitching.inherited_runs += score_change
-    
-    pitcher.stats.pitching.runs_allowed += score_change
-    if mc.runs_earned_this_pitch and mc.runs_earned_this_inning: # Will Always be true for now, but two bools will be used for error tracking later on.
-        pitcher.stats.pitching.earned_runs += score_change
-        log.debug(f"{pitcher.name} was charged with {score_change} earned run(s).")
-    
-    if inher_runner is not None:
-        mc.inherited_baserunners.remove((inher_runner, pitcher))
-        print(f"({inher_runner.name}, {pitcher.name}) removed from inherited runners list")
+        if pitcher != mc.pitcher:
+            log.info(f"{mc.pitcher.name} inherited this runner from {pitcher.name}. {pitcher.name} will be charged any earned runs.")
+            mc.pitcher.stats.pitching.inherited_runs += 1
+        
+        pitcher.stats.pitching.runs_allowed += 1
+        if mc.runs_earned_this_pitch and mc.runs_earned_this_inning: # Will Always be true for now, but two bools will be used later if error tracking is implemented
+            pitcher.stats.pitching.earned_runs += 1
+            log.debug(f"{pitcher.name} was charged with an earned run")
+        
+        if inher_runner is not None:
+            mc.inherited_baserunners.remove((inher_runner, pitcher))
+            #print(f"({inher_runner.name}, {pitcher.name}) removed from inherited runners list")
     
     
     
@@ -684,13 +779,13 @@ def _award_double_or_triple_plays(game: Game, mc: MatchContext):
         return
     
     if game.this_pitch.outs.value == 2:
-        print(f"Number of double play contributors: {len(mc.out_contributors)}")
+        #print(f"Number of double play contributors: {len(mc.out_contributors)}")
         for player in mc.out_contributors:
             print(f"{player.name},", end=" ")
             player.stats.fielding.double_plays += 1
         print(f"were credited with a double play!")
     else:
-        print(f"Number of triple play contributors: {len(mc.out_contributors)}")
+        #print(f"Number of triple play contributors: {len(mc.out_contributors)}")
         for player in mc.out_contributors:
             print(f"{player.name},", end=" ")
             player.stats.fielding.triple_plays += 1
@@ -709,19 +804,20 @@ def check_for_replay(game: Game, mc: MatchContext) -> bool:
     score_value2: int = game.team2.score.value
     outs_value: int = game.outs.value
     
-    score_or_out_changed = (
+    score_or_outs_reduced = (
         score_value1 < mc.team1_score
         or score_value2 < mc.team2_score
         or outs_value < mc.outs
     )
     #Arbitary number that I found worked well to avoid false positives without missing replays. May need to be adjusted in the future.
-    num_replay_checks = 200 
+    num_replay_checks = 20
     x = 0
     while x < num_replay_checks:
         game.in_replay.refresh()
-        if game.in_replay.value > 0 or score_or_out_changed:
+        if game.in_replay.value > 0 or score_or_outs_reduced:
             return True
         x += 1
+        time.sleep(0.02)
     return False
 
 def replay_state(state: Field, game: Game):
@@ -750,7 +846,7 @@ def replay_state(state: Field, game: Game):
 def intro_cutscene_state(state: Field, game: Game, mc: MatchContext):
     """Stat tracking for the intro loading & cutscene states"""
     check_hook_status()
-    log.info(f"{game.team1.name} vs. {game.team2.name} @ {game.time_of_day.display} {game.map.display}")
+    log.info(f"{game.team1.name} vs. {game.team2.name} @ {game.time_of_day.display} {game.stadium.display}")
     log.info(f"The {game.offense_team.short_name} will bat first!")
 
     _assign_score_and_meter_fields(game)
@@ -775,61 +871,64 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
     
     if mc.pitch_thrown_flag:
         mc.pitch_id += 1
-        log.debug(f"New pitch detected. Pitch ID is now {mc.pitch_id}.")
+        #log.debug(f"New pitch detected. Pitch ID is now {mc.pitch_id}.")
         mc.pitch_thrown_flag = False
         _process_last_pitch_snapshot(game, mc, last_pitch)
     
     
     
     for runner in mc.baserunners:
-        if runner.base is None:
+        if runner.baserunner_info is None:
             continue
-        _check_if_steal_success(game, runner, runner.base.base_num, mc)
+        _check_if_steal_success(game, runner, runner.baserunner_info.base_num, mc)
     
     
-    print()
-    print()
     mc.offense_team = game.offense_team
     mc.defense_team = game.defense_team
     mc.ball_hit_flag = False
     mc.at_bat_eligible = True
+    mc.pickoff_attempt_flag = False
+    mc.inside_the_park_hr_flag = False
     mc.plate_appearance_completed = False
+    mc.home_run_flag = False
+    mc.double_play_flag = False
+    mc.triple_play_flag = False
     mc.out_contributors = []
     mc.runners_scored_this_pitch = []
     mc.fielders_touched_ball_this_pitch = []
     mc.buddy_jumper = NO_PLAYER
     offense_meter = game.offense_team.meter.value
     defense_meter = game.defense_team.meter.value
+    game.runs_this_pitch = 0
+    mc.runs_this_pitch = 0
+    mc.potential_rbis = 0
+   
+    
+    
     game.strikes.refresh()
     game.balls.refresh()
     game.outs.refresh()
-    game.runs_this_play = 0
     game.pitches.refresh()
-    mc.pitches = game.pitches.value
-    
-    
     game.current_batter.refresh_all()
     game.current_batter.index.refresh()
     mc.batter = game.get_current_batter()
     mc.pitcher = game.get_current_pitcher()
     mc.positions = game.def_positions.get_all_position_indexes()
+    mc.pitches = game.pitches.value
     game.def_positions.refresh_all()
-
     game.set_def_positions()
     if not game.match_started:
         game.match_started = True
 
-    if game.pitches.value != mc.pitches or mc.batter is not game.get_current_batter():
-        mc.pitches = game.pitches.value
-
-    if (game.pitches.value == 0 and not mc.plate_appearance_begun) or mc.pitcher is not last_pitch.pitcher or mc.batter is not last_pitch.batter:
+    if (game.pitches.value == 0 and not mc.plate_appearance_begun) or (mc.pitcher is not last_pitch.pitcher) or (mc.batter is not last_pitch.batter):
+        print()
+        print()
         log.info(f"{mc.pitcher.name} vs. {mc.batter.name}")
         log.info(f"{game.outs.value} outs")
         mc.plate_appearance_begun = True
 
     log.debug(f"Count: {game.balls.value}-{game.strikes.value}")
 
-    game.set_def_positions()
     game.set_baserunners()
     _fill_baserunner_list(game, mc)
     mc.steal_attempters = [(NO_PLAYER, -1)] * 3
@@ -846,10 +945,10 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
     while state.display == "BATTING":
         check_hook_status()
         _refresh_game_values(game, team1, team2)
-        mc.is_replay = check_for_replay(game, mc)
-        if mc.is_replay:
-            replay_state(state, game)
-            return last_pitch
+        #mc.is_replay = check_for_replay(game, mc)
+        #if mc.is_replay:
+            #replay_state(state, game)
+            #return last_pitch
         
         
         # If a pitch has been thrown
@@ -877,8 +976,8 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
         _check_count_changes(game, mc.pitcher, mc.batter, mc)
 
         for runner in mc.baserunners:
-            if runner is not NO_PLAYER and runner.base is not None:
-                _check_if_steal_attempt(game, runner, runner.base.base_num, mc)
+            if runner is not NO_PLAYER and runner.baserunner_info is not None:
+                _check_if_steal_attempt(game, runner, runner.baserunner_info.base_num, mc)
                 
                 
         _check_if_ball_was_hit(game, offense_meter, mc)
@@ -936,11 +1035,14 @@ def fielding_state(state: Field, game: Game, team1: Team, team2: Team, mc: Match
         if new_thrower is not NO_PLAYER:
             last_thrower = new_thrower
         
-        buddy_jumper = __check_for_buddy_jump(game)
-        if buddy_jumper is not mc.buddy_jumper:
-            mc.buddy_jumper = buddy_jumper
-            if buddy_jumper is not NO_PLAYER:
-                log.info(f"{buddy_jumper.name} is going up for a buddy jump!")
+        
+        # Buddy Jump Flags that I found are currently INACCURATE. Turns out they are just "jump" flags. Need to find accurate flags before reimplementing
+        
+        #buddy_jumper = __check_for_buddy_jump(game)
+        #if buddy_jumper is not mc.buddy_jumper:
+            #mc.buddy_jumper = buddy_jumper
+            #if buddy_jumper is not NO_PLAYER:
+                #log.info(f"{buddy_jumper.name} is going up for a buddy jump!")
         
         
         if mc.ball_hit_flag and landing_status == BallLandingStatus.CAUGHT_OUT:
@@ -971,10 +1073,7 @@ def fielding_state(state: Field, game: Game, team1: Team, team2: Team, mc: Match
 
 def mid_inning_transition_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchContext):
     check_hook_status()
-    mc.is_replay = check_for_replay(game, mc)
-    if mc.is_replay:
-        replay_state(state, game)
-        return 
+    
 
     log.info(f"{team1.name} - {team1.score.value}")
     log.info(f"{team2.name} - {team2.score.value}")
@@ -983,8 +1082,15 @@ def mid_inning_transition_state(state: Field, game: Game, team1: Team, team2: Te
     mc.inherited_baserunners = []
     log.info("Changing sides!")
 
+    target_index = game.current_inning.value -1
+    if target_index < len(mc.offense_team.score_by_inning): 
+        mc.offense_team.score_by_inning[game.current_inning.value - 1] = game.runs_this_inning
+    else:
+        mc.offense_team.score_by_inning.append(game.runs_this_inning)
     game.runs_this_inning = 0
     printed = False
+    
+    
     time.sleep(3)  # Give time for side change data to settle
     game.inning_half.refresh()
     mc.inning_half = "Top" if game.inning_half.value == 0 else "Bottom"
@@ -1019,8 +1125,8 @@ def load_next_batter_state(state: Field, game: Game, mc: MatchContext, last_pitc
     mc.strikes = 0
     mc.balls = 0
     mc.pitches = 0
-    game.runs_this_play = 0    
-    
+    game.runs_this_pitch = 0    
+    mc.runs_this_pitch = 0
     
     global last_pitch_id_processed
     
@@ -1052,6 +1158,8 @@ def load_next_batter_state(state: Field, game: Game, mc: MatchContext, last_pitc
 
 def end_score_screen_state(state: Field, team1: Team, team2: Team, mc: MatchContext, last_pitch: PitchSnapshot):
     check_hook_status()
+    _refresh_game_values(game, team1, team2)
+    _update_match_context_values(game, team1, team2, mc)
     team1.hits.refresh()
     team2.hits.refresh()
     mc.team1_hits = team1.hits.value
@@ -1062,15 +1170,20 @@ def end_score_screen_state(state: Field, team1: Team, team2: Team, mc: MatchCont
         #log.debug(f"New pitch detected. Pitch ID is now {mc.pitch_id}.")
         mc.pitch_thrown_flag = False
         _process_last_pitch_snapshot(game, mc, last_pitch)
+    target_index = game.current_inning.value -1
+    if target_index < len(mc.offense_team.score_by_inning): 
+        mc.offense_team.score_by_inning[game.current_inning.value - 1] = game.runs_this_inning
+    else:
+        mc.offense_team.score_by_inning.append(game.runs_this_inning)
     
     log.info("Final Score:")
     log.info(f"{team1.name} - {team1.score.value}")
     log.info(f"{team2.name} - {team2.score.value}")
 
     if team1.score.value > team2.score.value:
-        log.info(f"{team1.name} wins!")
+        log.info(f"{team1.name} win!")
     elif team2.score.value > team1.score.value:
-        log.info(f"{team2.name} wins!")
+        log.info(f"{team2.name} win!")
     else:
         log.info("The game ended in a tie!")
 
@@ -1099,15 +1212,17 @@ def hr_base_celebration_state(state: Field, mc: MatchContext, last_pitch: PitchS
     check_hook_status()
 
     mc.home_run_flag = True
-    
-    if mc.runs_this_pitch == 1:
+    mc.inside_the_park_hr_flag = False
+    if game.this_pitch.runs.value == 1:
         log.info(f"{mc.batter.name} hits a solo homer off of {mc.pitcher.name}!")
-    elif mc.runs_this_pitch == 2:
+    elif game.this_pitch.runs.value == 2:
         log.info(f"{mc.batter.name} hits a two-run homer off of {mc.pitcher.name}!")
-    elif mc.runs_this_pitch == 3:
+    elif game.this_pitch.runs.value == 3:
         log.info(f"{mc.batter.name} hits a three-run homer off of {mc.pitcher.name}!")
-    else:
+    elif game.this_pitch.runs.value == 4:
         log.info(f"{mc.batter.name} hits a grand slam off of {mc.pitcher.name}!")
+    else:
+        log.info(f"{mc.batter.name} hits a homer off of {mc.pitcher.name}!")
     
     mc.batter.stats.batting.home_runs += 1
     mc.pitcher.stats.pitching.home_runs_allowed += 1
@@ -1153,7 +1268,7 @@ def pre_pitch_cutscene_state(state: Field, game: Game, team1: Team, team2: Team,
                 log.info(f"{player.name} was moved to {new_pos}.")
         
         if new_pitcher != last_pitcher:
-            log.debug(f"PITCHER CHANGE!")
+            #log.debug(f"PITCHER CHANGE!")
             _fill_baserunner_list(game, mc)
             for runner in mc.baserunners:
                 if runner is not NO_PLAYER:
@@ -1212,19 +1327,12 @@ if __name__ == "__main__":
                 break
 
         if match_start == 2:
-            print("It seems a game has already started. Would you like the program to still run?")
-            while True:
-                program_input = input("Type 'Y' for Yes or 'N' for No: ").strip().lower()
-                if program_input == 'y':
-                    break
-                elif program_input == 'n':
-                    print("Ending Program.")
-                    sys.exit()
-                else:
-                    print("Invalid Input. Please type 'Y' or 'N'")
+            print("It seems a game has already started. Stats will likely be incomplete.")
+            late_start = True
         else:
             log.info("Match is starting now!")
             time.sleep(1)  # Give time for the game to fully load
+            late_start = False
 
         log.info("Initializing game, team, and player data...")
 
@@ -1240,8 +1348,14 @@ if __name__ == "__main__":
             NO_TEAM, NO_TEAM,
             0, 0, 0,
             0, 0,
-            False, False, False, False, 0
+            False, False, False, False, False, False, 0, 0
         )
+        
+        if late_start:
+            game.stat_tracker_started_during_match = True
+        else:
+            game.stat_tracker_started_during_match = False
+        
         if match_start == 2:
             _assign_score_and_meter_fields(game)
 
