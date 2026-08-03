@@ -26,7 +26,7 @@ class Field:
         if type_str not in TYPE_INFO:
             raise ValueError(f"Unknown Type: {type_str}")
         
-        self.address = address
+        self.addr = address
         self.type_info = TYPE_INFO[type_str]
         self.size = self.type_info["size"]
         self.lookup = lookup
@@ -35,23 +35,32 @@ class Field:
             assert constant_value is not None
             self.value = constant_value
         else:
-            self.value = self.type_info["read"](Data(self.address,self.size))
+            self.value = self.type_info["read"](Data(self.addr,self.size))
     
     @classmethod
     def from_constant(cls, const_value, type_str: str, lookup=None):
         return cls(address=0x0, type_str=type_str, lookup=lookup, constant_value = const_value)
-        
+    
+    @classmethod
+    def from_pointer(cls, pointer_address: int, offset: int, type_str: str, lookup=None):
+        address = int.from_bytes(read_data(Data(pointer_address, 4)), "big")  # Read the pointer value
+        return cls(address=address + offset, type_str=type_str, lookup=lookup)
+
     def refresh(self):
         """Re-Read this field from Dolphin Memory."""
         if not self.is_constant:
-            self.value = self.type_info["read"](Data(self.address, self.size))
+            self.value = self.type_info["read"](Data(self.addr, self.size))
         return self.value
     
     def write(self, value):
         """Write new value to this field in Dolphin memory"""
         if not self.is_constant:
-            self.type_info["write"](Data(self.address,self.size), value)
+            self.type_info["write"](Data(self.addr,self.size), value)
         self.value = value
+    
+    @property
+    def address(self):
+        return hex(self.addr)
     
     @property
     def display(self):
@@ -138,19 +147,24 @@ class Player(Refreshable,Writable):
                 self.singles = 0
                 self.doubles = 0
                 self.triples = 0
+                self.star_singles = 0
+                self.star_doubles = 0
+                self.star_triples = 0
+                self.star_homeruns = 0
                 self.rbi = 0
                 self.walks = 0
                 self.home_runs = 0
                 self.inside_the_park_home_runs = 0
                 self.strikeouts = 0
                 self.hit_by_pitch = 0
+                self.star_swings = 0
                 self.star_hits = 0
                 self.flyouts = 0
                 self.ground_outs = 0
                 self.foul_balls = 0
                 self.plate_appearances = 0
                 self.sac_flys = 0
-                
+                self.sac_bunts = 0
                     
         
             @property
@@ -159,8 +173,8 @@ class Player(Refreshable,Writable):
             
             @property
             def on_base_percentage(self):
-                return (self.hits + self.walks) / self.plate_appearances if self.plate_appearances > 0 else 0.0
-            
+                return (self.hits + self.walks + self.hit_by_pitch) / (self.plate_appearances - self.sac_bunts) if (self.plate_appearances - self.sac_bunts) > 0 else 0.0
+
             @property
             def on_base_slugging(self):
                 return self.on_base_percentage + self.slugging_percentage
@@ -182,8 +196,14 @@ class Player(Refreshable,Writable):
                 self.bean_balls = 0
                 self.strikeouts = 0
                 self.hits_allowed = 0
-                self.runs_allowed = 0
+                self.singles_allowed = 0
+                self.doubles_allowed = 0
+                self.triples_allowed = 0
                 self.home_runs_allowed = 0
+                self.runs_allowed = 0
+                self.at_bats_against = 0
+                self.sac_flys_allowed = 0
+                self.sac_bunts_allowed = 0
                 self.batters_faced = 0
                 self.earned_runs = 0
                 self.pitch_count = 0
@@ -197,6 +217,25 @@ class Player(Refreshable,Writable):
             def innings_pitched(self):
                 return self.outs_pitched / 3
             
+            @property
+            def total_bases_allowed(self):
+                return self.singles_allowed + (2 * self.doubles_allowed) + (3 * self.triples_allowed) + (4 * self.home_runs_allowed)
+            @property
+            def batting_average_against(self):
+                return self.hits_allowed / self.at_bats_against if self.at_bats_against > 0 else 0.0
+            
+            @property
+            def on_base_percentage_against(self):
+                return (self.hits_allowed + self.walks + self.bean_balls) / (self.batters_faced - self.sac_bunts_allowed) if (self.batters_faced - self.sac_bunts_allowed) > 0 else 0.0
+            
+            @property
+            def on_base_slugging_against(self):
+                return self.on_base_percentage_against + self.slugging_percentage_against
+            
+            @property
+            def slugging_percentage_against(self):
+                return self.total_bases_allowed / self.at_bats_against if self.at_bats_against > 0 else 0.0
+
             @property
             def era_per_9(self):
                 if self.earned_runs > 0 and self.innings_pitched == 0:
@@ -224,6 +263,7 @@ class Player(Refreshable,Writable):
                 self.assists = 0
                 self.putouts = 0
                 self.throwouts = 0
+                self.buddy_jump_attempts = 0
                 self.buddy_jump_outs = 0
                 self.double_plays = 0
                 self.triple_plays = 0
@@ -551,10 +591,16 @@ class Game(Refreshable, Writable):
         self.batters_this_inning = Field(0x900D5E35, "u8")
         self.ball_was_hit = Field(0x900d6a94, "u8")
         self.inning_half = Field(0x900D5E25, "u8")
-        self.in_replay = Field(0x91374CA7, "u8")
-        self.left_buddy_jump_flag = Field(0x900DAED2, "u8")
-        self.center_buddy_jump_flag = Field(0x900DB1BE, "u8")
-        self.right_buddy_jump_flag = Field(0x900DB4AA, "u8")
+        self.in_replay = Field.from_pointer(0x80794C5C, 0x0013561B, "u8")
+        
+        self.left_field_airborne_flag = Field(0x900DAED2, "u8")
+        self.center_field_airborne_flag = Field(0x900DB1BE, "u8")
+        self.right_field_airborne_flag = Field(0x900DB4AA, "u8")
+
+        self.left_field_buddy_jump_flag = Field.from_pointer(0x80708D90, 0x0223, "u8")
+        self.center_field_buddy_jump_flag = Field.from_pointer(0x80708D94, 0x0223, "u8")
+        self.right_field_buddy_jump_flag = Field.from_pointer(0x80708D98, 0x0223, "u8")
+        
         self.star_costs = self.StarCosts()
         self.mercy_flag = Field(0x80794329, "u8")
         self.stars_flag = Field(0x8079432A, "u8")

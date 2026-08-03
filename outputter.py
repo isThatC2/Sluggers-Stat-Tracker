@@ -92,69 +92,85 @@ class Outputter:
         
     
     def output_player_stats_row(self, stats_sheet, player: Player, team: Team, row: int):
-            stats_sheet[f"B{row}"] = player.name
-            stats_sheet[f"C{row}"] = ", ".join(player.stats.positions_played)
-            stats_sheet[f"D{row}"] = player.stats.batting.at_bats
-            stats_sheet[f"E{row}"] = player.stats.batting.plate_appearances
-            stats_sheet[f"F{row}"] = player.stats.running.runs
-            stats_sheet[f"G{row}"] = player.stats.batting.hits
-            stats_sheet[f"H{row}"] = player.stats.batting.rbi
-            stats_sheet[f"I{row}"] = player.stats.batting.strikeouts
-            stats_sheet[f"J{row}"] = player.stats.batting.walks
-            stats_sheet[f"K{row}"] = player.stats.batting.hit_by_pitch
-            stats_sheet[f"L{row}"] = player.stats.batting.singles
-            stats_sheet[f"M{row}"] = player.stats.batting.doubles
-            stats_sheet[f"N{row}"] = player.stats.batting.triples
-            stats_sheet[f"O{row}"] = player.stats.batting.home_runs
-            stats_sheet[f"P{row}"] = player.stats.batting.inside_the_park_home_runs
-            stats_sheet[f"Q{row}"] = player.stats.batting.total_bases
-            stats_sheet[f"R{row}"] = player.stats.batting.sac_flys
-            stats_sheet[f"S{row}"] = player.stats.batting.star_hits
-            stats_sheet[f"T{row}"] = player.stats.batting.batting_average
-            stats_sheet[f"U{row}"] = player.stats.batting.on_base_percentage
-            stats_sheet[f"V{row}"] = player.stats.batting.slugging_percentage
-            stats_sheet[f"W{row}"] = player.stats.batting.on_base_slugging
-            stats_sheet[f"X{row}"] = player.stats.running.stolen_bases
-            stats_sheet[f"Y{row}"] = player.stats.running.caught_stealing
-            stats_sheet[f"Z{row}"] = player.stats.running.steal_attempts
-            stats_sheet[f"AA{row}"] = player.stats.fielding.putouts
-            stats_sheet[f"AB{row}"] = player.stats.fielding.assists
-            stats_sheet[f"AC{row}"] = player.stats.fielding.buddy_jump_outs
-            stats_sheet[f"AD{row}"] = player.stats.fielding.double_plays
-            stats_sheet[f"AE{row}"] = player.stats.fielding.triple_plays
-            stats_sheet[f"AF{row}"] = player.stats.fielding.errors
+            stat_getters = [
+                lambda p: p.name,
+                lambda p: ", ".join(p.stats.positions_played),
+                lambda p: p.stats.batting.at_bats,
+                lambda p: p.stats.batting.plate_appearances,
+                lambda p: p.stats.running.runs,
+                lambda p: p.stats.batting.hits,
+                lambda p: p.stats.batting.rbi,
+                lambda p: p.stats.batting.strikeouts,
+                lambda p: p.stats.batting.walks,
+                lambda p: p.stats.batting.hit_by_pitch,
+                lambda p: p.stats.batting.singles,
+                lambda p: p.stats.batting.doubles,
+                lambda p: p.stats.batting.triples,
+                lambda p: p.stats.batting.home_runs,
+                lambda p: p.stats.batting.inside_the_park_home_runs,
+                lambda p: p.stats.batting.total_bases,
+                lambda p: p.stats.batting.sac_flys,
+                lambda p: p.stats.batting.star_hits,
+                lambda p: p.stats.batting.batting_average,
+                lambda p: p.stats.batting.on_base_percentage,
+                lambda p: p.stats.batting.slugging_percentage,
+                lambda p: p.stats.batting.on_base_slugging,
+                lambda p: p.stats.running.stolen_bases,
+                lambda p: p.stats.running.caught_stealing,
+                lambda p: p.stats.running.steal_attempts,
+                lambda p: p.stats.fielding.putouts,
+                lambda p: p.stats.fielding.assists,
+                lambda p: p.stats.fielding.buddy_jump_outs,
+                lambda p: p.stats.fielding.double_plays,
+                lambda p: p.stats.fielding.triple_plays,
+                lambda p: p.stats.fielding.errors,
+            ]
+            
+            start_col = 2 
+            
+            for col_idx, get_stat in enumerate(stat_getters, start=start_col):
+                stats_sheet.cell(row=row, column=col_idx, value=get_stat(player))
+            
         
-    
     def output_pitching_row(self, pitching_sheet, player: Player, team: Team, row: int):
-            pitching_sheet[f"A{row}"] = team.short_name
-            pitching_sheet[f"B{row}"] = player.name
-            pitching_sheet[f"C{row}"] = player.stats.pitching.innings_pitched
-            pitching_sheet[f"D{row}"] = player.stats.pitching.batters_faced
-            pitching_sheet[f"E{row}"] = player.stats.pitching.strikeouts
-            pitching_sheet[f"F{row}"] = player.stats.pitching.hits_allowed
-            pitching_sheet[f"G{row}"] = player.stats.pitching.runs_allowed
-            pitching_sheet[f"H{row}"] = player.stats.pitching.home_runs_allowed
-            pitching_sheet[f"I{row}"] = player.stats.pitching.earned_runs
-            pitching_sheet[f"J{row}"] = player.stats.pitching.inherited_runs
-            pitching_sheet[f"K{row}"] = player.stats.pitching.walks
-            pitching_sheet[f"L{row}"] = player.stats.pitching.bean_balls
-            pitching_sheet[f"M{row}"] = player.stats.pitching.star_pitches
-            pitching_sheet[f"N{row}"] = player.stats.pitching.pickoffs
-            
-            if player.stats.pitching.era_per_7 == float('inf'):
-                pitching_sheet[f"O{row}"] = "INF"
-            else:
-                pitching_sheet[f"O{row}"] = player.stats.pitching.era_per_7
-            
-            if player.stats.pitching.era_per_9 == float('inf'):
-                pitching_sheet[f"P{row}"] = "INF"
-            else:
-                pitching_sheet[f"P{row}"] = player.stats.pitching.era_per_9
-                
-            if player.stats.pitching.whip == float('inf'):
-                pitching_sheet[f"Q{row}"] = "INF"
-            else:
-                pitching_sheet[f"Q{row}"] = player.stats.pitching.whip
+        
+        def check_inf(val):
+            return "INF" if val == float('inf') else val
+        
+        stat_getters = [
+            lambda p, t: t.short_name,
+            lambda p, t: p.name,
+            lambda p, t: p.stats.pitching.batters_faced,
+            lambda p, t: p.stats.pitching.innings_pitched,
+            lambda p, t: p.stats.pitching.pitch_count,
+            lambda p, t: p.stats.pitching.strikes,
+            lambda p, t: p.stats.pitching.balls,
+            lambda p, t: p.stats.pitching.strikeouts,
+            lambda p, t: p.stats.pitching.hits_allowed,
+            lambda p, t: p.stats.pitching.runs_allowed,
+            lambda p, t: p.stats.pitching.singles_allowed,
+            lambda p, t: p.stats.pitching.doubles_allowed,
+            lambda p, t: p.stats.pitching.triples_allowed,
+            lambda p, t: p.stats.pitching.home_runs_allowed,
+            lambda p, t: p.stats.pitching.earned_runs,
+            lambda p, t: p.stats.pitching.inherited_runs,
+            lambda p, t: p.stats.pitching.walks,
+            lambda p, t: p.stats.pitching.bean_balls,
+            lambda p, t: p.stats.pitching.star_pitches,
+            lambda p, t: p.stats.pitching.pickoffs,
+            lambda p, t: check_inf(p.stats.pitching.era_per_7),
+            lambda p, t: check_inf(p.stats.pitching.era_per_9),
+            lambda p, t: check_inf(p.stats.pitching.whip),
+            lambda p, t: check_inf(p.stats.pitching.batting_average_against),
+            lambda p, t: check_inf(p.stats.pitching.on_base_percentage_against),
+            lambda p, t: check_inf(p.stats.pitching.slugging_percentage_against),
+            lambda p, t: check_inf(p.stats.pitching.on_base_slugging_against),
+        ]
+        
+        start_col = 1 
+        
+        for col_idx, get_stat in enumerate(stat_getters, start=start_col):
+            pitching_sheet.cell(row=row, column=col_idx, value=get_stat(player, team))
     
     def output_stats(self, stats_sheet, game: Game, team1: Team, team2: Team):
         stats_sheet["A2"] = team1.short_name
@@ -185,7 +201,7 @@ class Outputter:
                 row_num += 1
 
 
-    def output_game(self, game: Game):
+    def output_game(self, game: Game) -> str:
         if "Stats" not in self.template.sheetnames:
             raise ValueError("Template does not contain a 'Stats' sheet.")
         
@@ -204,4 +220,5 @@ class Outputter:
         output_filename = self.make_output_filename(game)
         self.save(output_filename)
         print(f"Output saved to '{output_filename}'")
+        return output_filename
         
