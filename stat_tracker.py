@@ -788,7 +788,8 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
                             scorer = runner
                             mc.inside_the_park_hr_flag = True
                             break
-                        
+            
+            
             if scorer is not NO_PLAYER:
                 break 
             retries += 1
@@ -805,7 +806,7 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
             
         if scorer is not NO_PLAYER:
             mc.runners_scored_this_pitch.append(scorer)
-            log.info(f"{scorer.name} got a run!")
+            log.info(f"{scorer.name} recorded a run!")
             scorer.stats.running.runs += 1
             #log.debug(f"{scorer.name} has now scored {scorer.stats.running.runs} runs.")
             if scorer.baserunner_info is not None:
@@ -814,7 +815,7 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
             log.warning("Failed to identify run scorer")
         
         inher_runner, pitcher = next((left_runner for left_runner in mc.inherited_baserunners if scorer in left_runner), (None, mc.pitcher))
-
+        
         if pitcher != mc.pitcher:
             log.info(f"{mc.pitcher.name} inherited this runner from {pitcher.name}. {pitcher.name} will be charged any earned runs.")
             mc.pitcher.stats.pitching.inherited_runs += 1
@@ -827,6 +828,8 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
         if inher_runner is not None:
             mc.inherited_baserunners.remove((inher_runner, pitcher))
             #print(f"({inher_runner.name}, {pitcher.name}) removed from inherited runners list")
+        
+        log.debug(f"Score Updated: {game.team1.name} {game.team1.score.value} - {game.team2.name} {game.team2.score.value}")
     
     
     
@@ -1320,7 +1323,7 @@ def pre_pitch_cutscene_state(state: Field, game: Game, team1: Team, team2: Team,
     check_hook_status()
     game.last_state.refresh()
     
-    #There are several pre-pitch cutscenes (tired pitcher, rbi chance), but the only time anything needs to be done is when you are coming from the change-lineup screen (new pitcher cutscene)
+    #There are several pre-pitch cutscenes (tired pitcher, rbi chance), but the only time anything needs to be done is when coming from the change-lineup screen (new pitcher cutscene)
     if game.last_state.display == "CHANGE_LINEUP":
 
         game.def_positions.refresh_all()
@@ -1347,11 +1350,37 @@ def pre_pitch_cutscene_state(state: Field, game: Game, team1: Team, team2: Team,
                         runner_left_on_base_entry = (runner, mc.pitcher)
                         mc.inherited_baserunners.append(runner_left_on_base_entry)
                         #log.info(f"{last_pitcher.name} left {runner.name} on base when they left.")
-                    
-
+    
     while state.display == "PRE_PITCH_CUTSCENE":
         state.refresh()
-                
+                    
+def _rematch_state(state: Field, old_game: Game, old_team1: Team, old_team2: Team, old_mc: MatchContext, old_last_pitch: PitchSnapshot) -> tuple[Game, Team, Team, MatchContext, PitchSnapshot]:
+    time.sleep(1.5)
+    log.info("Rematch detected. Resetting game state...")
+    del old_game, old_team1, old_team2, old_mc, old_last_pitch
+    team1 = Team(**TEAM1_ADDRESSES)
+    team2 = Team(**TEAM2_ADDRESSES)
+    game = Game(team1, team2)
+    global last_pitch_id_processed
+    last_pitch_id_processed = -1
+    mc = MatchContext()
+    game.stat_tracker_started_during_match = False
+    last_pitch : PitchSnapshot = PitchSnapshot(
+        0, 0, 0, 0,
+        NO_PLAYER, NO_PLAYER,
+        [NO_PLAYER] * 3, [], [], [],
+        NO_TEAM, NO_TEAM,
+        0, 0, 0,
+        0, 0,
+        False, False, False, False, False, False, 0, 0
+    )
+    _assign_score_and_meter_fields(game)
+    log.info(f"{game.team1.name} vs. {game.team2.name} @ {game.time_of_day.display} {game.stadium.display}")
+    log.info(f"The {game.offense_team.short_name} will bat first!")
+    return game, team1, team2, mc, last_pitch
+
+
+        
 
 
 # ------Main Code-------
@@ -1456,7 +1485,10 @@ if __name__ == "__main__":
                 case "PRE_PITCH_CUTSCENE":
                     pre_pitch_cutscene_state(state, game, team1, team2, match_context)
                 case "REMATCH":
-                    state.refresh()
+                    _clear_log_cache()
+                    game, team1, team2, match_context, last_pitch = _rematch_state(state, game, team1, team2, match_context, last_pitch)
+                    while state.display == "REMATCH":
+                        state.refresh()
                 case _ if state.value not in game.STATE:
                     log.error(f"State value is out of range: {state.value}")
                     game.being_played = False
