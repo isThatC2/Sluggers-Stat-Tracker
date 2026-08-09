@@ -1,0 +1,16 @@
+[project]
+name = "sluggers-stat-tracker"
+version = "1.0.0"
+description = "Automatic Mario Super Sluggers stat tracker for Dolphin"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dolphin-memory-engine==1.3.0",
+    "et-xmlfile==2.0.0",
+    "openpyxl==3.1.5",
+]
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.18.0",
+]
