@@ -31,7 +31,34 @@ class GameLogCacheHandler(logging.Handler):
         except Exception:
             pass
 
-
+class HomeRunLog(): 
+    def __init__(self, batter: Player, pitcher: Player, num_runs: int, offense_team: Team, defense_team: Team, 
+                 num_outs: int, inning_half: str, inning_num: int, inside_the_park_hr: bool = False):
+        self.batter = batter
+        self.pitcher = pitcher
+        self.num_runs = num_runs
+        self.num_outs = num_outs
+        self.inning_half = inning_half
+        self.inning_num = inning_num
+        self.offense_team = offense_team
+        self.defense_team = defense_team
+        self.inside_the_park_hr = inside_the_park_hr
+    
+        self.summary_string = f"{self.batter.name} hit a {'inside-the-park ' if self.inside_the_park_hr else ''} {self.home_run_type_str} off of {self.pitcher.name} in the {self.inning_half} of inning {self.inning_num}! " \
+    
+    @property
+    def home_run_type_str(self) -> str:
+        if self.num_runs == 1:
+            return "Solo Home Run"
+        elif self.num_runs == 2:
+            return "Two-Run Home Run"
+        elif self.num_runs == 3:
+            return "Three-Run Home Run"
+        elif self.num_runs >= 4:
+            return "Grand Slam"
+        else:
+            return "Home Run"
+        
 _log_cache_handler = GameLogCacheHandler()
 log.addHandler(_log_cache_handler)
 
@@ -97,6 +124,8 @@ class MatchContext:
         self.runners_scored_this_pitch: list[Player] = []
         self.pitchers_thrown_this_at_bat: list[Player] = []
         self.fielders_touched_ball_this_pitch: list[Player] = []
+        self.live_bobblers: list[Player] = []
+        self.bobbled_this_pitch: list[Player] = []
         self.inherited_baserunners: list[tuple[Player, Player]] = []
         self.defense_lineup: dict[Player, str] = {}
         self.offense_team_score: int = 0
@@ -379,8 +408,7 @@ def _check_count_changes(game: Game, pitcher: Player, batter: Player, mc: MatchC
                         label = f"Strike {game.strikes.value}.")
     
     out_happened = record_if_increased(game.outs.value, mc.outs,
-                        (mc.pitcher.stats.pitching, "outs_pitched"),
-                        label = f"{mc.pitcher.name} got an out! That's {game.outs.value}!")
+                        (mc.pitcher.stats.pitching, "outs_pitched"),)
     
     if ball_happened and game.balls.value == 4:
         mc.pitcher.stats.pitching.walks += 1
@@ -476,24 +504,46 @@ def _check_if_ball_was_hit(game: Game, offense_meter: int, mc: MatchContext):
         mc.steal_attempters = []
         mc.ball_hit_flag = True
 
-        
-            
 
+def _check_for_bobble(game: Game, mc: MatchContext) -> list[Player]:
+    """Checks if the ball was bobbled and awards the stat"""
+    bobblers_this_tick: list[Player] = []
+    for defender in  mc.defense_team.players:
+        if defender.def_position is not None:
+            defender.def_position.bobble_flag.refresh()
+            if defender.def_position.bobble_flag.value in [2, 3, 4, 5, 6] and defender not in mc.live_bobblers:
+                log.info(f"{defender.name} bobbled the ball!")
+                defender.stats.fielding.bobbles += 1
+                bobblers_this_tick.append(defender)
+                mc.live_bobblers.append(defender)
+            else:
+                if defender in mc.live_bobblers and defender.def_position.bobble_flag.value not in [2, 3, 4, 5, 6]:
+                    mc.live_bobblers.remove(defender)
+    return bobblers_this_tick
+
+def _update_bobblers_this_pitch(mc: MatchContext, bobbler: Player):
+    if bobbler not in mc.bobbled_this_pitch:
+        mc.bobbled_this_pitch.append(bobbler)
+    
 def _check_for_star_swing_usage(game: Game, offense_meter: int, mc: MatchContext):
     """Checks if the batter used a star swing and awards the stat"""
     sc = game.star_costs
     game.offense_team.meter.refresh()
-    if offense_meter - game.offense_team.meter.value in (sc.captain_star_cost.value, sc.non_main_captain_star_cost.value, sc.regular_star_cost.value):
+    meter_cost = offense_meter - game.offense_team.meter.value
+    if meter_cost in (sc.captain_star_cost.value, sc.non_main_captain_star_cost.value, sc.regular_star_cost.value):
         mc.batter.stats.batting.star_swings += 1
         mc.star_swing_flag = True
+        mc.batter.stats.batting.raw_stars_used += meter_cost
         log.info(f"{mc.batter.name} used a star swing!")
 
 def _check_for_star_pitch_usage(game: Game, defense_meter: int, mc: MatchContext):
     """Checks if the pitcher threw a star pitch and awards the stat"""
     sc = game.star_costs
     game.defense_team.meter.refresh()
-    if defense_meter - game.defense_team.meter.value in (sc.captain_star_cost.value, sc.non_main_captain_star_cost.value, sc.regular_star_cost.value):
+    meter_cost = defense_meter - game.defense_team.meter.value
+    if meter_cost in (sc.captain_star_cost.value, sc.non_main_captain_star_cost.value, sc.regular_star_cost.value):
         mc.pitcher.stats.pitching.star_pitches += 1
+        mc.pitcher.stats.pitching.raw_stars_used += meter_cost
         log.info(f"{mc.pitcher.name} used a star pitch!")
 
 def _process_last_pitch_snapshot(game: Game, mc: MatchContext, last_pitch: PitchSnapshot):
@@ -513,6 +563,15 @@ def _process_last_pitch_snapshot(game: Game, mc: MatchContext, last_pitch: Pitch
         last_pitch.pitcher.stats.pitching.home_runs_allowed += 1
         
         log.debug(f"{last_pitch.batter.name} recorded an inside the park home run!")
+        if last_pitch.runs_this_pitch == 1:
+            last_pitch.batter.stats.batting.one_run_homeruns += 1
+        elif last_pitch.runs_this_pitch == 2:
+            last_pitch.batter.stats.batting.two_run_homeruns += 1
+        elif last_pitch.runs_this_pitch == 3:
+            last_pitch.batter.stats.batting.three_run_homeruns += 1
+        elif last_pitch.runs_this_pitch >= 4:
+            last_pitch.batter.stats.batting.grand_slams += 1
+            
     
     
     #hit_recorded = _check_if_hit_was_recorded(game, game.team1, game.team2, mc)
@@ -532,20 +591,32 @@ def _process_last_pitch_snapshot(game: Game, mc: MatchContext, last_pitch: Pitch
                 log.info(f"{last_pitch.batter.name} recorded {last_pitch.potential_rbis} RBI!")
             
         
+        star_status = "star " if last_pitch.star_swing_flag else ""
+        if last_pitch.star_swing_flag:
+            last_pitch.batter.stats.batting.star_hits += 1
         
         if last_pitch.num_bases_ran == 3:
             last_pitch.batter.stats.batting.triples += 1
             last_pitch.pitcher.stats.pitching.triples_allowed += 1
-            log.debug(f"{last_pitch.batter.name} recorded a triple!")
+            
+            if last_pitch.star_swing_flag:
+                last_pitch.batter.stats.batting.star_triples += 1
+            log.debug(f"{last_pitch.batter.name} recorded a {star_status}triple!")
             
         elif last_pitch.num_bases_ran == 2:
             last_pitch.batter.stats.batting.doubles += 1
             last_pitch.pitcher.stats.pitching.doubles_allowed += 1
-            log.debug(f"{last_pitch.batter.name} recorded a double!")
+            
+            if last_pitch.star_swing_flag:
+                last_pitch.batter.stats.batting.star_doubles += 1
+            log.debug(f"{last_pitch.batter.name} recorded a {star_status}double!")
         elif last_pitch.num_bases_ran == 1:
             last_pitch.batter.stats.batting.singles += 1
             last_pitch.pitcher.stats.pitching.singles_allowed += 1
-            log.debug(f"{last_pitch.batter.name} recorded a single!")
+            
+            if last_pitch.star_swing_flag:
+                last_pitch.batter.stats.batting.star_singles += 1
+            log.debug(f"{last_pitch.batter.name} recorded a {star_status}single!")
 
     
 # ---------------------- FIELDING STATE HELPER FUNCTIONS----------------------------- 
@@ -841,15 +912,13 @@ def _award_double_or_triple_plays(game: Game, mc: MatchContext):
     if game.this_pitch.outs.value == 2:
         #print(f"Number of double play contributors: {len(mc.out_contributors)}")
         for player in mc.out_contributors:
-            print(f"{player.name},", end=" ")
+            log.info(f"{player.name} was credited with a double play!")
             player.stats.fielding.double_plays += 1
-        print(f"were credited with a double play!")
     else:
         #print(f"Number of triple play contributors: {len(mc.out_contributors)}")
         for player in mc.out_contributors:
-            print(f"{player.name},", end=" ")
+            log.info(f"{player.name} was credited with a triple play!")
             player.stats.fielding.triple_plays += 1
-        print(f"were credited with a triple play!!")
     
 
 
@@ -955,6 +1024,8 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
     mc.out_contributors = []
     mc.runners_scored_this_pitch = []
     mc.fielders_touched_ball_this_pitch = []
+    mc.bobbled_this_pitch = []
+    mc.live_bobblers = []
     mc.buddy_jumper = NO_PLAYER
     offense_meter = game.offense_team.meter.value
     defense_meter = game.defense_team.meter.value
@@ -1001,6 +1072,11 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
         if mc.baserunners[3] is not NO_PLAYER:
             log.debug(f"{mc.baserunners[3].name} is on third.")
 
+
+    log.debug(f"Defense Bobble Flag Addresses:")
+    for defender in mc.defense_team.players:
+        if defender.def_position is not None:
+            log.debug(f"{defender.name} ({defender.def_position.abbrev}) - {defender.def_position.bobble_flag.address}")
     while state.display == "BATTING":
         check_hook_status()
         _refresh_game_values(game, team1, team2)
@@ -1097,7 +1173,10 @@ def fielding_state(state: Field, game: Game, team1: Team, team2: Team, mc: Match
             last_thrower = new_thrower
         
         
-        # Buddy Jump Flags that I found are currently INACCURATE. Turns out they are just "jump" flags. Need to find accurate flags before reimplementing
+        bobblers_this_tick = _check_for_bobble(game, mc)
+        
+        for bobbler in bobblers_this_tick:
+            _update_bobblers_this_pitch(mc, bobbler)
         
         buddy_jumper = __check_for_buddy_jump(game)
         if buddy_jumper is not mc.buddy_jumper:
@@ -1288,17 +1367,24 @@ def hr_base_celebration_state(state: Field, mc: MatchContext, last_pitch: PitchS
     mc.home_run_flag = True
     mc.inside_the_park_hr_flag = False
     if game.this_pitch.runs.value == 1:
+        mc.batter.stats.batting.one_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a solo homer off of {mc.pitcher.name}!")
     elif game.this_pitch.runs.value == 2:
+        mc.batter.stats.batting.two_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a two-run homer off of {mc.pitcher.name}!")
     elif game.this_pitch.runs.value == 3:
+        mc.batter.stats.batting.three_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a three-run homer off of {mc.pitcher.name}!")
-    elif game.this_pitch.runs.value == 4:
+    elif game.this_pitch.runs.value >= 4:
+        mc.batter.stats.batting.grand_slams += 1
         log.info(f"{mc.batter.name} hits a grand slam off of {mc.pitcher.name}!")
     else:
         log.info(f"{mc.batter.name} hits a homer off of {mc.pitcher.name}!")
     
     mc.batter.stats.batting.home_runs += 1
+    if mc.star_swing_flag:
+        mc.batter.stats.batting.star_homeruns += 1
+        log.info(f"{mc.batter.name} used a star swing for the homer!")
     mc.pitcher.stats.pitching.home_runs_allowed += 1
     while state.display == "HR_BASE_CELEBRATION" or state.display == "HR_HOMEIN_CELEBRATION":
         _refresh_game_values(game, team1, team2)
@@ -1491,6 +1577,7 @@ if __name__ == "__main__":
                         state.refresh()
                 case _ if state.value not in game.STATE:
                     log.error(f"State value is out of range: {state.value}")
+                    game.match_quit_early = True
                     game.being_played = False
                 case _:
                     state.refresh()

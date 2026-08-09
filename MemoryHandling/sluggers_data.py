@@ -1,7 +1,10 @@
-from enum import IntEnum;
+from enum import IntEnum
+from unicodedata import name;
 from dolphin_mem import Data, read_data, write_data 
 from typing import TYPE_CHECKING, Any
 import struct
+import os
+import json
 
 # Reading & Writing Memory Helpers
 
@@ -17,7 +20,6 @@ TYPE_INFO = {
     "s8": {"size": 1, "read": lambda d: int.from_bytes(read_data(d), "big", signed=True), "write": lambda d, v: write_data(d, v.to_bytes(1, "big", signed=True))},
     "s16": {"size": 2, "read": lambda d: int.from_bytes(read_data(d), "big", signed=True), "write": lambda d, v: write_data(d, v.to_bytes(2, "big", signed=True))},
     "s32": {"size": 4, "read": lambda d: int.from_bytes(read_data(d), "big", signed=True), "write": lambda d, v: write_data(d, v.to_bytes(4, "big", signed=True))},
-    "fs32": {"size": 4, "read": lambda d: struct.unpack(">f", read_data(d))[0], "write": lambda d, v: write_data(d, struct.pack(">f", float(v)))},
     "char": {"size": 1, "read": lambda d: read_data(d).decode("ascii"), "write": lambda d, v: write_data(d, v.encode("ascii"))}
 }
 
@@ -128,7 +130,7 @@ class Player(Refreshable,Writable):
         self.stats = self.Stats()
         self.team_number = team_number
         self.batting_index = batting_index
-        self.position: Position | None = None
+        self.def_position: DefensePosition | None = None
         self.baserunner_info: Runner | None = None
 
     class Stats:
@@ -154,11 +156,16 @@ class Player(Refreshable,Writable):
                 self.rbi = 0
                 self.walks = 0
                 self.home_runs = 0
+                self.one_run_homeruns = 0
+                self.two_run_homeruns = 0
+                self.three_run_homeruns = 0
+                self.grand_slams = 0
                 self.inside_the_park_home_runs = 0
                 self.strikeouts = 0
                 self.hit_by_pitch = 0
                 self.star_swings = 0
                 self.star_hits = 0
+                self.raw_stars_used = 0
                 self.flyouts = 0
                 self.ground_outs = 0
                 self.foul_balls = 0
@@ -186,8 +193,20 @@ class Player(Refreshable,Writable):
             def slugging_percentage(self):
                 return self.total_bases / self.at_bats if self.at_bats > 0 else 0.0 
                     
-        
-    
+            @property
+            def stars_used(self):
+                return self.raw_stars_used / 50.0
+            
+            @property
+            def total_star_bases(self):
+                return self.star_singles + (2 * self.star_doubles) + (3 * self.star_triples) + (4 * self.star_homeruns)
+            
+            @property
+            def star_slugging_percentage(self):
+                if self.stars_used == 0:
+                    return None
+                
+                return self.total_star_bases / self.stars_used
         class Pitching:
             def __init__(self):
                 self.strikes = 0
@@ -209,6 +228,7 @@ class Player(Refreshable,Writable):
                 self.pitch_count = 0
                 self.outs_pitched = 0
                 self.star_pitches = 0
+                self.raw_stars_used = 0
                 self.pickoffs = 0
                 self.pickoff_attempts = 0
                 self.inherited_runs = 0
@@ -245,8 +265,8 @@ class Player(Refreshable,Writable):
             
             @property
             def era_per_7(self):
-                if self.earned_runs > 0 and self.innings_pitched == 0:
-                    return float('inf')
+                if self.innings_pitched == 0:
+                    return float('inf') if self.earned_runs > 0 else 0.0
                 
                 return (self.earned_runs * 7) / self.innings_pitched if self.innings_pitched > 0 else 0.0
                 
@@ -258,6 +278,9 @@ class Player(Refreshable,Writable):
                 
                 return (self.walks + self.hits_allowed) / self.innings_pitched if self.innings_pitched > 0 else 0.0
 
+            @property
+            def stars_used(self):
+                return self.raw_stars_used / 50.0
         class Fielding:
             def __init__(self) -> None:
                 self.assists = 0
@@ -267,13 +290,18 @@ class Player(Refreshable,Writable):
                 self.buddy_jump_outs = 0
                 self.double_plays = 0
                 self.triple_plays = 0
-                self.errors = 0 
+                self.errors = 0
+                self.bobbles = 0
                 self.close_plays_won = 0 # No Close Play Stats are currently being tracked.
                 self.close_plays_lost = 0  # No Close Play Stats are currently being tracked.
                 
             @property
             def fielding_chances(self):
-                return self.putouts + self.assists + self.errors
+                return self.putouts + self.assists + self.errors + self.bobbles
+            
+            @property
+            def fielding_percentage(self):
+                return (self.putouts + self.assists) / self.fielding_chances if self.fielding_chances > 0 else 0.0
         
         class Running:
             def __init__(self) -> None:
@@ -293,7 +321,7 @@ class _NoPlayer(Player):
         self.name = "No Player"
         self.team_number = -1
         self.batting_index = -1
-        self.position = None
+        self.def_position = None
         self.baserunner_info = None
         self.stats = Player.Stats()        
 NO_PLAYER = _NoPlayer()
@@ -309,10 +337,13 @@ class PlayerType(IntEnum):
     def from_value(cls, value):
         return cls(value) if value in cls._value2member_map_ else cls.CPU
     
-class Position(Refreshable, Writable):
-    def __init__(self, index_address, name, abbrev):
+class DefensePosition(Refreshable, Writable):
+    def __init__(self, index_address, fielder_pointer_address, name, abbrev):
         self.index = Field(index_address, "u8")
         self.position_name: str = name
+        self.fielder_pointer_address = fielder_pointer_address
+        self.bobble_flag = Field.from_pointer(fielder_pointer_address, 0x02B2, "u8")
+        self.buddy_jump_flag = Field.from_pointer(fielder_pointer_address, 0x0223, "u8")
         self.abbrev:str = abbrev
         self.player: Player | _NoPlayer = NO_PLAYER
     
@@ -333,6 +364,111 @@ class Runner(Refreshable, Writable):
         self.is_stealing.refresh()
         
         
+
+def _load_team_branding():
+    """
+    Load team branding from a JSON or TXT file located next to this module.
+
+    JSON expected formats:
+    - { "0": ["Long Name", "Short"], "1": {"long": "Long Name", "short": "Short"}, ... }
+      keys may be decimal or hex (e.g. "0x00").
+
+    TXT expected simple format (one entry per line):
+      key<sep>Long Name|Short Name
+    where key is decimal or 0x hex, sep can be ':' or ',' or TAB or whitespace. Lines starting with '#' are ignored.
+
+    If the file is not present or parsing fails, fall back to a built-in default mapping.
+    """
+    module_dir = os.path.dirname(__file__)
+    json_path = os.path.join(module_dir, "team_branding.json")
+    txt_path = os.path.join(module_dir, "team_branding.txt")
+    branding = {}
+    branding_short = {}
+    try:
+        if os.path.exists(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for k, v in data.items():
+                try:
+                    key = int(str(k), 0)
+                except Exception:
+                    # skip invalid keys
+                    continue
+                if isinstance(v, (list, tuple)) and len(v) >= 2:
+                    long_name, short = v[0], v[1]
+                elif isinstance(v, dict):
+                    long_name = v.get("long") or v.get("name")
+                    short = v.get("short") or v.get("short_name")
+                else:
+                    # unsupported value, skip
+                    continue
+                if long_name is None:
+                    continue
+                branding[key] = long_name
+                branding_short[key] = short if short is not None else long_name
+        elif os.path.exists(txt_path):
+            with open(txt_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    # try separators
+                    for sep in (":", ",", "\t"):
+                        if sep in line:
+                            parts = line.split(sep, 1)
+                            break
+                    else:
+                        parts = line.split(None, 1)
+                    if len(parts) != 2:
+                        continue
+                    key_str, names = parts[0].strip(), parts[1].strip()
+                    try:
+                        key = int(key_str, 0)
+                    except Exception:
+                        continue
+                    if "|" in names:
+                        long_name, short = [p.strip() for p in names.split("|", 1)]
+                    elif "," in names:
+                        long_name, short = [p.strip() for p in names.split(",", 1)]
+                    else:
+                        long_name, short = names, names
+                    branding[key] = long_name
+                    branding_short[key] = short
+        else:
+            # no external file found -> trigger fallback
+            raise FileNotFoundError
+    except Exception:
+        # fallback to built-in defaults
+        branding = {
+            0x00: "Mario Fireballs",
+            0x01: "Luigi Knights",
+            0x02: "DK Wilds",
+            0x03: "Diddy Monkeys",
+            0x04: "Peach Monarchs",
+            0x05: "Daisy Flowers",
+            0x06: "Yoshi Eggs",
+            0x07: "Bowser Monsters",
+            0x08: "Wario Muscles",
+            0x09: "Waluigi Spitballs",
+            0x0A: "Birdo Bows",
+            0x0B: "Jr. Rookies"
+        }
+        branding_short = {
+            0x00: "Fireballs",
+            0x01: "Knights",
+            0x02: "Wilds",
+            0x03: "Monkeys",
+            0x04: "Monarchs",
+            0x05: "Flowers",
+            0x06: "Eggs",
+            0x07: "Monsters",
+            0x08: "Muscles",
+            0x09: "Spitballs",
+            0x0A: "Bows",
+            0x0B: "Rookies"
+        }
+    return branding, branding_short
+
 
 class Team(Refreshable, Writable):
     if TYPE_CHECKING:
@@ -516,35 +652,8 @@ class Team(Refreshable, Writable):
         0x02: "Player",
         0x03: "Player",
     }
-    TEAM_BRANDING = {
-        0x00: "Mario Fireballs",
-        0x01: "Luigi Knights",
-        0x02: "DK Wilds",
-        0x03: "Diddy Monkeys",
-        0x04: "Peach Monarchs",
-        0x05: "Daisy Flowers",
-        0x06: "Yoshi Eggs",
-        0x07: "Bowser Monsters",
-        0x08: "Wario Muscles",
-        0x09: "Waluigi Spitballs",
-        0x0A: "Birdo Bows",
-        0x0B: "Jr. Rookies"
-    }
+    TEAM_BRANDING, TEAM_BRANDING_SHORT = _load_team_branding()
     
-    TEAM_BRANDING_SHORT = {
-        0x00: "Fireballs",
-        0x01: "Knights",
-        0x02: "Wilds",
-        0x03: "Monkeys",
-        0x04: "Monarchs",
-        0x05: "Flowers",
-        0x06: "Eggs",
-        0x07: "Monsters",
-        0x08: "Muscles",
-        0x09: "Spitballs",
-        0x0A: "Bows",
-        0x0B: "Rookies"
-    }
     
     OFFENSE_DEFENSE = {
         0x00: "BATTING",
@@ -566,7 +675,7 @@ class Game(Refreshable, Writable):
     def __init__(self, team1: Team, team2: Team):
         self.team1: Team = team1
         self.team2: Team = team2
-        self.total_innings = Field(0x80794328, "u8")
+        self.regulation_innings = Field(0x80794328, "u8")
         self.current_inning = Field(0x900D5D97, "u8")
         self.outs = Field(0x900D5AA9, "u8")
         self.pitches = Field(0x900D692C, "u8")
@@ -584,6 +693,7 @@ class Game(Refreshable, Writable):
         self.runs_this_inning = 0
         self.runs_this_pitch = 0
         self.match_started = False
+        self.match_quit_early = False
         self.game_timer = Field(0x900dfcfc, "u32")
         self.stadium = Field(0x811F769D, "u8",lookup=self.MAP)
         self.time_of_day = Field(0x811F769F, "u8",lookup=self.TIME_OF_DAY)
@@ -733,7 +843,7 @@ class Game(Refreshable, Writable):
         
         pos.refresh_all()
         for i in range(9):
-            off_players[i].position = None
+            off_players[i].def_position = None
         
         positions_list = [
             pos.pitcher, pos.catcher, pos.first_base, pos.second_base,
@@ -744,8 +854,8 @@ class Game(Refreshable, Writable):
             position.player = NO_PLAYER
             
         for position in positions_list:
-            player = def_players[position.index.value]
-            player.position = position
+            player: Player = def_players[position.index.value]
+            player.def_position = position
             position.player = player
 
 
@@ -757,15 +867,15 @@ class Game(Refreshable, Writable):
             
     class DefensePositions(Refreshable, Writable):
         def __init__(self):
-            self.pitcher = Position(0x900d9b45, "Pitcher", "P")
-            self.catcher = Position(0x900d9e31, "Catcher", "C")
-            self.first_base = Position(0x900da11d, "First Base", "1B")
-            self.second_base = Position(0x900da409, "Second Base", "2B")
-            self.third_base = Position(0x900da6f5, "Third Base", "3B")
-            self.shortstop = Position(0x900da9e1, "Shortstop", "SS")
-            self.left_field = Position(0x900daccd, "Left Field", "LF")
-            self.center_field = Position(0x900dafb9, "Center Field", "CF")
-            self.right_field = Position(0x900db2a5, "Right Field", "RF")
+            self.pitcher = DefensePosition(0x900d9b45, 0x80708D78, "Pitcher", "P")
+            self.catcher = DefensePosition(0x900d9e31, 0x80708D7C,  "Catcher", "C")
+            self.first_base = DefensePosition(0x900da11d, 0x80708D80, "First Base", "1B")
+            self.second_base = DefensePosition(0x900da409, 0x80708D84, "Second Base", "2B")
+            self.third_base = DefensePosition(0x900da6f5, 0x80708D88, "Third Base", "3B")
+            self.shortstop = DefensePosition(0x900da9e1, 0x80708D8C, "Shortstop", "SS")
+            self.left_field = DefensePosition(0x900daccd, 0x80708D90, "Left Field", "LF")
+            self.center_field = DefensePosition(0x900dafb9, 0x80708D94, "Center Field", "CF")
+            self.right_field = DefensePosition(0x900db2a5, 0x80708D98, "Right Field", "RF")
         
         def refresh_all(self):
             positions = [

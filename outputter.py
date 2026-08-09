@@ -1,6 +1,6 @@
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.cell import column_index_from_string, get_column_letter
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Font, PatternFill
 from MemoryHandling.sluggers_data import Field, Player, Team, Game, NO_PLAYER, NO_TEAM
 import datetime
 from pathlib import Path
@@ -17,23 +17,27 @@ class Outputter:
     
     
     def make_output_filename(self, game: Game) -> str:
-        output_name = f"{game.team1.short_name} vs {game.team2.short_name} - {datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')}.xlsx"
+        output_name = f"{game.away_team.short_name} vs {game.home_team.short_name} - {datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')}.xlsx"
         if Path(self.output_path / output_name).exists():
-            output_name = f"{game.team1.short_name} vs {game.team2.short_name} - {datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')}_{datetime.datetime.now().microsecond}.xlsx"
+            output_name = f"{game.away_team.short_name} vs {game.home_team.short_name} - {datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')}_{datetime.datetime.now().microsecond}.xlsx"
         return output_name
     def save(self, output_filename: str):
         self.template.save(self.output_path / output_filename)
     
     
     def output_game_info(self, game_info_sheet, game: Game):
-        team1 = game.team1
-        team2 = game.team2
+        team1 = game.away_team
+        team2 = game.home_team
         gi = game_info_sheet
         if game.stat_tracker_started_during_match:
-            gi["L10"] = "INCOMPLETE"
+            gi["L9"] = "Stat Tracker Started During Match"
         else:
-            gi["L10"] = None
+            gi["L9"] = None
         
+        if game.match_quit_early:
+            gi["L10"] = "Match Quit Early"
+        else:
+            gi["L10"] = None 
         
         gi["L11"] = team1.name
         gi["P11"] = team2.name
@@ -46,7 +50,7 @@ class Outputter:
         
         
         gi["I14"] = f"{game.stadium.display} - {game.time_of_day.display}"
-        gi["M15"] = f"Innings - {game.total_innings.value}"
+        gi["M15"] = f"Innings - {game.regulation_innings.value}"
         gi["M16"] = f"Mercy - {"On" if game.mercy_flag.value == 1 else "Off"}"
         gi["M17"] = f"Stars - {"On" if game.stars_flag.value == 1 else "Off"}"
         gi["M18"] = f"Items - {"On" if game.item_flag.value == 1 else "Off"}"
@@ -61,7 +65,7 @@ class Outputter:
         
         for i, player in enumerate(team2.players):
             gi[f"R{starting_row + i}"] = player.name
-            if team1.starting_lineup_set:
+            if team2.starting_lineup_set:
                 gi[f"Q{starting_row + i}"] = team2.starting_lineup.get(player, "N/A")
             else:
                 gi[f"Q{starting_row + i}"] = "N/A"
@@ -73,16 +77,31 @@ class Outputter:
         gi["J31"] = game.away_team.name
         gi["J32"] = game.home_team.name
         
-        for i in range(game.current_inning.value):
+        if game.current_inning.value > 1:
+            for i in range(game.current_inning.value):
+                gi.cell(row=scoreboard_row, column=current_col).value = i + 1
+                gi.cell(row=scoreboard_row + 1, column=current_col).value = game.away_team.score_by_inning[i]
+                gi.cell(row=scoreboard_row + 2, column=current_col).value = game.home_team.score_by_inning[i]
+
+                if i + 1 > game.regulation_innings.value:
+                    gi.cell(row=scoreboard_row, column=current_col).font = Font(color="FF0000")
+                    gi.cell(row=scoreboard_row + 1, column=current_col).font = Font(color="FF0000")
+                    gi.cell(row=scoreboard_row + 2, column=current_col).font = Font(color="FF0000")
+                current_col += 1
+        else:
             gi.cell(row=scoreboard_row, column=current_col).value = i + 1
-            gi.cell(row=scoreboard_row + 1, column=current_col).value = game.away_team.score_by_inning[i]
-            gi.cell(row=scoreboard_row + 2, column=current_col).value = game.home_team.score_by_inning[i]
-            current_col += 1
+            gi.cell(row=scoreboard_row + 1, column=current_col).value = game.away_team.score.value
+            gi.cell(row=scoreboard_row + 2, column=current_col).value = game.home_team.score.value
+            
         
         gi.cell(row=scoreboard_row, column=current_col).value = "Final"
+        gi.cell(row=scoreboard_row, column=current_col).font = Font(bold=True)
         gi.cell(row=scoreboard_row, column=current_col).alignment = Alignment(horizontal='right')
+        
         gi.cell(row=scoreboard_row + 1, column=current_col).value = game.away_team.score.value
+        gi.cell(row=scoreboard_row + 1, column=current_col).font = Font(bold=True)
         gi.cell(row=scoreboard_row + 2, column=current_col).value = game.home_team.score.value
+        gi.cell(row=scoreboard_row + 2, column=current_col).font = Font(bold=True)
         
             
             
@@ -107,23 +126,30 @@ class Outputter:
                 lambda p: p.stats.batting.doubles,
                 lambda p: p.stats.batting.triples,
                 lambda p: p.stats.batting.home_runs,
+                lambda p: p.stats.batting.one_run_homeruns,
+                lambda p: p.stats.batting.two_run_homeruns,
+                lambda p: p.stats.batting.three_run_homeruns,
+                lambda p: p.stats.batting.grand_slams,
                 lambda p: p.stats.batting.inside_the_park_home_runs,
                 lambda p: p.stats.batting.total_bases,
                 lambda p: p.stats.batting.sac_flys,
                 lambda p: p.stats.batting.star_hits,
+                lambda p: p.stats.batting.stars_used,
                 lambda p: p.stats.batting.batting_average,
                 lambda p: p.stats.batting.on_base_percentage,
                 lambda p: p.stats.batting.slugging_percentage,
                 lambda p: p.stats.batting.on_base_slugging,
+                lambda p: p.stats.batting.star_slugging_percentage,
                 lambda p: p.stats.running.stolen_bases,
                 lambda p: p.stats.running.caught_stealing,
                 lambda p: p.stats.running.steal_attempts,
                 lambda p: p.stats.fielding.putouts,
                 lambda p: p.stats.fielding.assists,
                 lambda p: p.stats.fielding.buddy_jump_outs,
+                lambda p: p.stats.fielding.buddy_jump_attempts,
                 lambda p: p.stats.fielding.double_plays,
                 lambda p: p.stats.fielding.triple_plays,
-                lambda p: p.stats.fielding.errors,
+                lambda p: p.stats.fielding.bobbles,
             ]
             
             start_col = 2 
@@ -133,44 +159,9 @@ class Outputter:
             
         
     def output_pitching_row(self, pitching_sheet, player: Player, team: Team, row: int):
-        
-        def check_inf(val):
-            return "INF" if val == float('inf') else val
-        
-        stat_getters = [
-            lambda p, t: t.short_name,
-            lambda p, t: p.name,
-            lambda p, t: p.stats.pitching.batters_faced,
-            lambda p, t: p.stats.pitching.innings_pitched,
-            lambda p, t: p.stats.pitching.pitch_count,
-            lambda p, t: p.stats.pitching.strikes,
-            lambda p, t: p.stats.pitching.balls,
-            lambda p, t: p.stats.pitching.strikeouts,
-            lambda p, t: p.stats.pitching.hits_allowed,
-            lambda p, t: p.stats.pitching.runs_allowed,
-            lambda p, t: p.stats.pitching.singles_allowed,
-            lambda p, t: p.stats.pitching.doubles_allowed,
-            lambda p, t: p.stats.pitching.triples_allowed,
-            lambda p, t: p.stats.pitching.home_runs_allowed,
-            lambda p, t: p.stats.pitching.earned_runs,
-            lambda p, t: p.stats.pitching.inherited_runs,
-            lambda p, t: p.stats.pitching.walks,
-            lambda p, t: p.stats.pitching.bean_balls,
-            lambda p, t: p.stats.pitching.star_pitches,
-            lambda p, t: p.stats.pitching.pickoffs,
-            lambda p, t: check_inf(p.stats.pitching.era_per_7),
-            lambda p, t: check_inf(p.stats.pitching.era_per_9),
-            lambda p, t: check_inf(p.stats.pitching.whip),
-            lambda p, t: check_inf(p.stats.pitching.batting_average_against),
-            lambda p, t: check_inf(p.stats.pitching.on_base_percentage_against),
-            lambda p, t: check_inf(p.stats.pitching.slugging_percentage_against),
-            lambda p, t: check_inf(p.stats.pitching.on_base_slugging_against),
-        ]
-        
-        start_col = 1 
-        
-        for col_idx, get_stat in enumerate(stat_getters, start=start_col):
-            pitching_sheet.cell(row=row, column=col_idx, value=get_stat(player, team))
+        header_columns = self._pitching_header_columns(pitching_sheet)
+        for header, get_stat, _ in self._pitching_stat_specs():
+            pitching_sheet.cell(row=row, column=header_columns[header], value=get_stat(player, team))
     
     def output_stats(self, stats_sheet, game: Game, team1: Team, team2: Team):
         stats_sheet["A2"] = team1.short_name
@@ -189,16 +180,124 @@ class Outputter:
         
     
     def output_pitching(self, pitching_sheet, game: Game, team1: Team, team2: Team):
+        header_columns = self._pitching_header_columns(pitching_sheet)
         row_num = 2
-        for i, player in enumerate(team1.pitcher_order):
-            if player.stats.pitching.batters_faced > 0:
-                self.output_pitching_row(pitching_sheet, player, team1, row_num)
-                row_num += 1
-        
-        for i, player in enumerate(team2.pitcher_order):
-            if player.stats.pitching.batters_faced > 0:
-                self.output_pitching_row(pitching_sheet, player, team2, row_num)
-                row_num += 1
+        team1_start_row = row_num
+        for player in team1.pitcher_order:
+            self.output_pitching_row(pitching_sheet, player, team1, row_num)
+            row_num += 1
+
+        team2_start_row = row_num
+        for player in team2.pitcher_order:
+            self.output_pitching_row(pitching_sheet, player, team2, row_num)
+            row_num += 1
+
+        self.output_pitching_team_totals(
+            pitching_sheet,
+            team1,
+            row_num,
+            team1_start_row,
+            header_columns,
+            fill_color="#F4CCCC",
+        )
+        row_num += 1
+        self.output_pitching_team_totals(
+            pitching_sheet,
+            team2,
+            row_num,
+            team2_start_row,
+            header_columns,
+            fill_color="#C9DAF8",
+        )
+
+    def output_pitching_team_totals(
+        self,
+        pitching_sheet,
+        team: Team,
+        row: int,
+        team_start_row: int,
+        header_columns: dict[str, int],
+        fill_color: str | None = None,
+    ):
+        num_rows_to_read = len(team.pitcher_order)
+        start_row = team_start_row
+        end_row = team_start_row + num_rows_to_read - 1
+
+        pitching_sheet.cell(row=row, column=1, value=f"{team.short_name} Totals")
+        pitching_sheet.cell(row=row, column=2, value=team.short_name)
+
+        for header, _, aggregate_type in self._pitching_stat_specs():
+            if aggregate_type is None:
+                continue
+            col_idx = header_columns[header]
+            column_letter = get_column_letter(col_idx)
+            if aggregate_type == "sum":
+                formula = f"=SUM({column_letter}{start_row}:{column_letter}{end_row})"
+            elif aggregate_type == "era_7":
+                er_col = get_column_letter(header_columns["Earned Runs"])
+                ip_col = get_column_letter(header_columns["Innings Pitched"])
+                formula = f'=IF({ip_col}{row}=0,"INF",{er_col}{row}*7/{ip_col}{row})'
+            elif aggregate_type == "era_9":
+                er_col = get_column_letter(header_columns["Earned Runs"])
+                ip_col = get_column_letter(header_columns["Innings Pitched"])
+                formula = f'=IF({ip_col}{row}=0,"INF",{er_col}{row}*9/{ip_col}{row})'
+            else:
+                formula = f"=AVERAGE({column_letter}{start_row}:{column_letter}{end_row})"
+
+            pitching_sheet.cell(row=row, column=col_idx, value=formula)
+
+        if fill_color:
+            normalized = fill_color.lstrip("#")
+            if len(normalized) == 6:
+                normalized = f"FF{normalized}"
+            fill = PatternFill(fill_type="solid", start_color=normalized, end_color=normalized)
+            for col_idx in range(1, max(header_columns.values()) + 1):
+                pitching_sheet.cell(row=row, column=col_idx).fill = fill
+
+    def _pitching_stat_specs(self):
+        def check_inf(val):
+            return "INF" if val == float('inf') else val
+
+        # (header, value_getter, team_totals_aggregation)
+        return [
+            ("Player", lambda p, t: p.name, None),
+            ("Team", lambda p, t: t.short_name, None),
+            ("Batters Faced", lambda p, t: p.stats.pitching.batters_faced, "sum"),
+            ("Innings Pitched", lambda p, t: p.stats.pitching.innings_pitched, "sum"),
+            ("Pitches", lambda p, t: p.stats.pitching.pitch_count, "sum"),
+            ("Strikes", lambda p, t: p.stats.pitching.strikes, "sum"),
+            ("Balls", lambda p, t: p.stats.pitching.balls, "sum"),
+            ("Strikeouts", lambda p, t: p.stats.pitching.strikeouts, "sum"),
+            ("Walks", lambda p, t: p.stats.pitching.walks, "sum"),
+            ("Bean Balls", lambda p, t: p.stats.pitching.bean_balls, "sum"),
+            ("Hits Allowed", lambda p, t: p.stats.pitching.hits_allowed, "sum"),
+            ("Runs Allowed", lambda p, t: p.stats.pitching.runs_allowed, "sum"),
+            ("Singles Allowed", lambda p, t: p.stats.pitching.singles_allowed, "sum"),
+            ("Doubles Allowed", lambda p, t: p.stats.pitching.doubles_allowed, "sum"),
+            ("Triples Allowed", lambda p, t: p.stats.pitching.triples_allowed, "sum"),
+            ("HR Allowed", lambda p, t: p.stats.pitching.home_runs_allowed, "sum"),
+            ("Earned Runs", lambda p, t: p.stats.pitching.earned_runs, "sum"),
+            ("Inherited Runs", lambda p, t: p.stats.pitching.inherited_runs, "sum"),
+            ("Star Pitches", lambda p, t: p.stats.pitching.star_pitches, "sum"),
+            ("Stars Used", lambda p, t: p.stats.pitching.stars_used, "sum"),
+            ("Pickoffs", lambda p, t: p.stats.pitching.pickoffs, "sum"),
+            ("Pickoff Attempts", lambda p, t: p.stats.pitching.pickoff_attempts, "sum"),
+            ("ERA-7", lambda p, t: check_inf(p.stats.pitching.era_per_7), "era_7"),
+            ("ERA-9", lambda p, t: check_inf(p.stats.pitching.era_per_9), "era_9"),
+            ("WHIP", lambda p, t: check_inf(p.stats.pitching.whip), "avg"),
+            ("BA Against", lambda p, t: check_inf(p.stats.pitching.batting_average_against), "avg"),
+            ("OB% Against", lambda p, t: check_inf(p.stats.pitching.on_base_percentage_against), "avg"),
+            ("SLG Against", lambda p, t: check_inf(p.stats.pitching.slugging_percentage_against), "avg"),
+            ("OPS Against", lambda p, t: check_inf(p.stats.pitching.on_base_slugging_against), "avg"),
+        ]
+
+    def _pitching_header_columns(self, pitching_sheet) -> dict[str, int]:
+        header_columns = {}
+        for col_idx in range(1, pitching_sheet.max_column + 1):
+            header = pitching_sheet.cell(row=1, column=col_idx).value
+            if header:
+                header_columns[str(header)] = col_idx
+        return header_columns
 
 
     def output_game(self, game: Game) -> str:
@@ -214,8 +313,8 @@ class Outputter:
         
         print("Beginning output of game data to Excel...")
         self.output_game_info(game_info_sheet, game)
-        self.output_stats(stats_sheet, game, game.team1, game.team2)
-        self.output_pitching(pitching_sheet, game, game.team1, game.team2)
+        self.output_stats(stats_sheet, game, game.away_team, game.home_team)
+        self.output_pitching(pitching_sheet, game, game.away_team, game.home_team)
         print("Saving output file...")
         output_filename = self.make_output_filename(game)
         self.save(output_filename)
