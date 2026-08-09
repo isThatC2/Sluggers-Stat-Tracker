@@ -1,1 +1,22 @@
+build/
+dist/
+*.exe
+*.zip
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo

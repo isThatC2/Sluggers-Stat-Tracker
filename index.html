@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sluggers Stat Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        html,
+        body {
+            min-height: 100%;
+        }
+
+        html {
+            background: linear-gradient(90deg, #572a8a 0%, #b982ed 50%, #572a8a 100%);
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+            color: #2e163f;
+            font-size: 1.2rem;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 60ch;
+            padding: 2rem;
+            background-color: #fdfaff;
+            border: 2px solid #6b359e;
+            border-radius: 1rem;
+            box-shadow: 0 1rem 2.5rem rgb(49 17 78 / 28%);
+        }
+
+        header {
+            text-align: center;
+        }
+
+        header p {
+            margin-top: 0.35rem;
+        }
+
+        @keyframes wiggle {
+            0%,
+            100% {
+                transform: rotate(0deg);
+            }
+
+            20%,
+            60% {
+                transform: rotate(-3deg);
+            }
+
+            40%,
+            80% {
+                transform: rotate(3deg);
+            }
+        }
+
+        .download-button {
+            display: inline-block;
+            padding: 0.6rem 1.1rem;
+            border: 1px solid #6b359e;
+            border-radius: 0.35rem;
+            background-color: #ead4ff;
+            color: #2e163f;
+            font-size: 1.1rem;
+            font-weight: 650;
+            text-decoration: none;
+            transition: background-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .download-button:hover {
+            background-color: #d4a7ff;
+            animation: wiggle 0.5s ease-in-out;
+        }
+
+        .download-button:focus-visible {
+            outline: 3px solid #2e163f;
+            outline-offset: 3px;
+        }
+
+        .download-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .download-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+
+        .notice {
+            padding: 1rem 1.25rem;
+            border-left: 4px solid #7d42b3;
+            border-radius: 0.5rem;
+            background-color: #f3e7ff;
+            font-size: 1rem;
+            line-height: 1.5;
+        }
+
+        a {
+            color: #5e248f;
+        }
+    </style>
+</head>
+
+<body>
+    <main class="container">
+        <header>
+            <h1>Sluggers Stat Tracker</h1>
+            <p>Automatic Mario Super Sluggers stat tracking for Dolphin</p>
+        </header>
+
+        <p>
+            Track a game automatically and export its box score and player statistics to Excel.
+        </p>
+
+        <section class="download-section" aria-labelledby="download-heading">
+            <p id="download-heading"><strong>Download {{RELEASE_NAME}}</strong></p>
+            <div class="download-buttons">
+                <a class="download-button" href="{{WINDOWS_DOWNLOAD_URL}}" download>Windows</a>
+                <a class="download-button" href="{{LINUX_DOWNLOAD_URL}}" download>Linux</a>
+            </div>
+            <p><a href="{{RELEASES_URL}}">View all releases</a></p>
+        </section>
+
+        <p class="notice">
+            Requires Dolphin Emulator. macOS builds are unavailable because dolphin-memory-engine supports
+            this application on Windows and Linux only.
+        </p>
+    </main>
+</body>
+
+</html>

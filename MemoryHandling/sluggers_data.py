@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 import struct
 import os
 import json
+import sys
 
 # Reading & Writing Memory Helpers
 
@@ -380,8 +381,14 @@ def _load_team_branding():
     If the file is not present or parsing fails, fall back to a built-in default mapping.
     """
     module_dir = os.path.dirname(__file__)
-    json_path = os.path.join(module_dir, "team_branding.json")
-    txt_path = os.path.join(module_dir, "team_branding.txt")
+    resource_dir = module_dir
+    if getattr(sys, "frozen", False):
+        external_dir = os.path.join(os.path.dirname(sys.executable), "MemoryHandling")
+        bundle_dir = os.path.join(getattr(sys, "_MEIPASS", module_dir), "MemoryHandling")
+        resource_dir = external_dir if os.path.isdir(external_dir) else bundle_dir
+
+    json_path = os.path.join(resource_dir, "team_branding.json")
+    txt_path = os.path.join(resource_dir, "team_branding.txt")
     branding = {}
     branding_short = {}
     try:

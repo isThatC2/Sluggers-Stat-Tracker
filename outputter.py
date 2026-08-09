@@ -4,9 +4,29 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from MemoryHandling.sluggers_data import Field, Player, Team, Game, NO_PLAYER, NO_TEAM
 import datetime
 from pathlib import Path
+import sys
+
+
+def _resource_path(filename: str) -> Path:
+    """Resolve a release asset from beside the executable or its bundle."""
+    relative_path = Path(filename)
+    if relative_path.is_absolute():
+        return relative_path
+
+    if getattr(sys, "frozen", False):
+        external_path = Path(sys.executable).resolve().parent / relative_path
+        if external_path.exists():
+            return external_path
+
+        bundle_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        return bundle_dir / relative_path
+
+    return Path(__file__).resolve().parent / relative_path
+
+
 class Outputter:
     def __init__(self, template_filename: str, game: Game):
-        self.tmp_filename = template_filename
+        self.tmp_filename = _resource_path(template_filename)
         self.game = game
         self.output_path = Path.cwd() / "output"
         self.output_path.mkdir(exist_ok=True)
@@ -535,4 +555,3 @@ class Outputter:
         self.save(output_filename)
         print(f"Output saved to '{output_filename}'")
         return output_filename
-        

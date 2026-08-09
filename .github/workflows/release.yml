@@ -1,0 +1,143 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create a GitHub release and deploy GitHub Pages
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON_PREFERENCE: only-system
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "latest"
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Create zip archive
+        shell: bash
+        run: |
+          archive="sluggers-stat-tracker-${{ matrix.platform }}.zip"
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            7z a "$archive" ./dist/*
+          else
+            cd dist
+            zip -r "../$archive" .
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sluggers-stat-tracker-${{ matrix.platform }}
+          path: sluggers-stat-tracker-${{ matrix.platform }}.zip
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Generate release information
+        id: release_info
+        shell: bash
+        run: |
+          release_name="$(date +'%Y-%m-%d')-$(git rev-parse --short HEAD)"
+          {
+            echo "release_name=$release_name"
+            echo "release_notes<<EOF"
+            cat README.md
+            echo
+            echo "---"
+            echo
+            git log -1 --pretty=%B
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ steps.release_info.outputs.release_name }}
+          name: ${{ steps.release_info.outputs.release_name }}
+          body: ${{ steps.release_info.outputs.release_notes }}
+          files: |
+            artifacts/sluggers-stat-tracker-windows/sluggers-stat-tracker-windows.zip
+            artifacts/sluggers-stat-tracker-linux/sluggers-stat-tracker-linux.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate GitHub Pages site
+        shell: bash
+        env:
+          RELEASE_NAME: ${{ steps.release_info.outputs.release_name }}
+        run: |
+          release_name="$RELEASE_NAME"
+          repository_url="${{ github.server_url }}/${{ github.repository }}"
+          release_url="$repository_url/releases/download/$release_name"
+          mkdir -p _pages
+          sed \
+            -e "s|{{RELEASE_NAME}}|$release_name|g" \
+            -e "s|{{WINDOWS_DOWNLOAD_URL}}|$release_url/sluggers-stat-tracker-windows.zip|g" \
+            -e "s|{{LINUX_DOWNLOAD_URL}}|$release_url/sluggers-stat-tracker-linux.zip|g" \
+            -e "s|{{RELEASES_URL}}|$repository_url/releases|g" \
+            index.html > _pages/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _pages
+
+      - name: Publish to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
