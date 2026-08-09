@@ -1,12 +1,7 @@
 # Sluggers Stat Tracker
 
 https://isthatc2.github.io/Sluggers-Stat-Tracker/
-
 An Automatic Stat Tracker MSS on Dolphin
-
-## Disclaimers ⚠️
-- Sluggers Stat Tracker supports Windows and Linux. This application utilizes the dolphin-memory-engine Python library, which does not currently support macOS.
-An Automatic Stat Tracker for Exhibition Matches in Mario Super Sluggers on Dolphin!
 
 ## Disclaimers ⚠️
 - Sluggers Stat Tracker supports Windows and Linux. This application utilizes the dolphin-memory-engine python library, which does not currently support macOS.
