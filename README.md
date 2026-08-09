@@ -1,6 +1,7 @@
 # Sluggers Stat Tracker
 
 https://isthatc2.github.io/Sluggers-Stat-Tracker/
+
 An Automatic Stat Tracker MSS on Dolphin
 
 ## Disclaimers ⚠️
@@ -16,7 +17,7 @@ This program is a command line/window application that reads Dolphin memory addr
 If you are using the portable .exe version found at the link above, you may skip this section. However, if you are using the source code version (.py files), please install the prerequisite python modules specified in requirements.txt
 
 ## Installation
-Download the latest portable version of the Sluggers Stat Tracker from the link above or download the source code from the latest release.
+Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-Tracker/) of the Sluggers Stat Tracker from the link above or download the source code from the latest release.
 
 ## Instructions:
 - Download the stat tracker & install prerequisite python modules
