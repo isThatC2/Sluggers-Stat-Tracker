@@ -2,8 +2,16 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Create a GitHub release and deploy GitHub Pages
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -58,13 +66,18 @@ jobs:
           path: sluggers-stat-tracker-${{ matrix.platform }}.zip
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish == true)
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pages: write
       id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,4 +141,5 @@ jobs:
           path: _pages
 
       - name: Publish to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
