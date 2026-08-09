@@ -821,12 +821,13 @@ def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool)
         mc.potential_rbis += score_change
     
     if sacrifice_possible and not mc.sacrifice_flag:
+        game.this_pitch.refresh_all()
         mc.batter.stats.batting.sac_flys += 1
         mc.pitcher.stats.pitching.sac_flys_allowed += 1
         mc.sacrifice_flag = True
         log.info(f"{mc.batter.name} recorded a sacrifice fly!")
         mc.at_bat_eligible = False
-        log.info(f"at_bat_eligible = False due to sacrifice fly")
+        #log.info(f"at_bat_eligible = False due to sacrifice fly")
     
     # Repeat process of individual run tracking for every run scored this tick
     for _ in range(0, score_change):
@@ -1073,10 +1074,6 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
             log.debug(f"{mc.baserunners[3].name} is on third.")
 
 
-    log.debug(f"Defense Bobble Flag Addresses:")
-    for defender in mc.defense_team.players:
-        if defender.def_position is not None:
-            log.debug(f"{defender.name} ({defender.def_position.abbrev}) - {defender.def_position.bobble_flag.address}")
     while state.display == "BATTING":
         check_hook_status()
         _refresh_game_values(game, team1, team2)
@@ -1162,7 +1159,7 @@ def fielding_state(state: Field, game: Game, team1: Team, team2: Team, mc: Match
         if mc.ball_hit_flag and landing_status in (BallLandingStatus.FAIR, BallLandingStatus.FAIR_FIELDED) and not mc.plate_appearance_completed:
             mc.plate_appearance_completed = True
             mc.at_bat_eligible = True
-            log.info(f"{mc.batter.name}'s plate appearance completed with a hit ball.")
+            #log.info(f"{mc.batter.name}'s plate appearance completed with a hit ball.")
             
         current_ball_holder, last_ball_holder, new_thrower = _check_ball_status_change(ball_status, last_ball_status, game)
         
@@ -1191,10 +1188,10 @@ def fielding_state(state: Field, game: Game, team1: Team, team2: Team, mc: Match
             if not caught_out_complete_flags_set:
                 if not mc.plate_appearance_completed:
                     mc.plate_appearance_completed = True
-                    log.info(f"plate_appearance_completed set to true (caught out)")
+                    #log.info(f"plate_appearance_completed set to true (caught out)")
                 if not mc.at_bat_eligible and not mc.sacrifice_flag:
                     mc.at_bat_eligible = True
-                    log.info(f"at_bat_eligible set to true (caught out)")
+                    #log.info(f"at_bat_eligible set to true (caught out)")
                 caught_out_complete_flags_set = True
             if game.outs.value < 2:
                 sacrifice_possible = True
