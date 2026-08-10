@@ -16,13 +16,13 @@ Special thanks to jackharrhy for setting up the download site!!
 This program is a command line/window application that reads Dolphin memory addresses live during Exhibition Matches in Mario Super Sluggers in order to track game stats live, and later output them into an Excel Workbook. Simply run it in the background while Sluggers is open in Dolphin, enter an Exhiition Match, and the tracker will begin tracking the game's events automatically. 
 
 ## Prerequisites
-If you are using the portable .exe version found at the link above, no prerequisites are required. However, if you are using the source code version (.py files, not recommended), please install the prerequisite python modules specified in requirements.txt
+If you are using the portable .exe version found at the link above, no prerequisites are required other than Dolplin Emulator and a copy of Mario Super Sluggers (USA version). However, if you are using the source code version (.py files), please install the prerequisite python modules specified in requirements.txt
 
 ## Installation
-Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-Tracker/) of the Sluggers Stat Tracker from the link above or download the source code from the latest release.
+Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-Tracker/) of the Sluggers Stat Tracker or download source code from the repo (not recommended).
 
 ## Instructions:
-- Download the stat tracker & install prerequisite python modules
+- Download the stat tracker
 - Run Dolphin and open Mario Super Sluggers
 - Run stat_tracker.py anytime before an exhibition match begins. This can be from the title screen all the way up until to the end of the match start cutscene.
 - The stat tracker will wait until it detects a match starting, and will automatically begin tracking stats!
