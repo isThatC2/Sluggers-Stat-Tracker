@@ -26,7 +26,9 @@ Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-
 - Run Dolphin and open Mario Super Sluggers.
 - Run stat_tracker.py anytime before an exhibition match begins. This can be done anywhere from the title screen up until the end of the match start cutscene.
 - The stat tracker will wait until it detects a match starting and will automatically begin tracking stats!
-- If the match ends or is quit out early, the stat tracker will output an Excel sheet (.xlsx) and a .log file containing its results.
+- That's it! You can view the play-by-play logs in the terminal or you can minimize it until the game is over.
+- Once the match ends and the game reaches the MVP screen (or if the match is ended early), the stat tracker will output an Excel sheet (.xlsx) and a .log file containing its results.
+- The tracker will automatically start tracking a new game if you click the rematch button, otherwise if you exit to the main menu, the tracker will ask you if you want to track another game.
 
 ## My Stat Tracker Isn't Detecting Match Start / Is Detecting a Match Start That Didn't Happen
 If your stat tracker seems to be unresponsive or misbehaving, it is likely due to an issue with the dolphin-memory-engine Python module. Since it is not an issue caused by the stat tracker itself, I am unable to fix it directly. I have, however, found a workaround for this issue.
