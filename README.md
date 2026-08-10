@@ -38,6 +38,6 @@ If at any point, your stat tracker seems to be failing to detect a match properl
 4. Close Settings and Reopen Mario Super Sluggers.
 5. Load the save state you made previously.
 
-In my experience developing the stat tracker, this has worked without fail. You can also do this process before attempting to use the stat tracker (opening and then immediately closing Sluggers, then following steps 2-4). I found that to work as well.
+In my experience developing the stat tracker, this has worked without fail and I have zero idea why. You can also do this process before attempting to use the stat tracker (opening and then immediately closing Sluggers, then following steps 2-4). I found that to work as well.
 
 Enjoy!
