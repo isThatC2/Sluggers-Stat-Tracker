@@ -1363,6 +1363,7 @@ def hr_base_celebration_state(state: Field, mc: MatchContext, last_pitch: PitchS
 
     mc.home_run_flag = True
     mc.inside_the_park_hr_flag = False
+    game.this_pitch.runs.refresh()
     if game.this_pitch.runs.value == 1:
         mc.batter.stats.batting.one_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a solo homer off of {mc.pitcher.name}!")
