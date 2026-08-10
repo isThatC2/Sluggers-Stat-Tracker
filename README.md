@@ -4,6 +4,8 @@ https://isthatc2.github.io/Sluggers-Stat-Tracker/
 
 An Automatic Stat Tracker MSS on Dolphin
 
+Special thanks to jackharrhy for setting up the download site!!
+
 ## Disclaimers ⚠️
 - Sluggers Stat Tracker supports Windows and Linux. This application utilizes the dolphin-memory-engine python library, which does not currently support macOS.
 - Sluggers Stat Tracker is designed for use with Dolphin Emulator only and does not work with other emulators or official hardware.
