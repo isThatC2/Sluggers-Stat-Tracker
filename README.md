@@ -3,6 +3,7 @@
 https://isthatc2.github.io/Sluggers-Stat-Tracker/
 
 An Automatic Stat Tracker MSS on Dolphin
+
 Special thanks to jackharrhy for setting up the download site!!
 
 ## Disclaimers ⚠️
