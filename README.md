@@ -30,6 +30,12 @@ Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-
 - Once the match ends and the game reaches the MVP screen (or if the match is ended early), the stat tracker will output an Excel sheet (.xlsx) and a .log file containing its results.
 - The tracker will automatically start tracking a new game if you click the rematch button, otherwise if you exit to the main menu, the tracker will ask you if you want to track another game.
 
+## Custom Team Names
+Want to change the team names in the stat tracker for your league? Sluggers Stat Tracker supports custom team names!
+- Go to your extracted folder
+- Open the MemoryHandling folder and open team_branding.json in a text editor
+- Change the full and short team name to your name of choice. For example, to change the Mario Fireballs to the Delfino Sunburns, you would replace "Mario Fireballs" with Delfino Sunburns and "Fireballs" with Sunburns
+
 ## My Stat Tracker Isn't Detecting Match Start / Is Detecting a Match Start That Didn't Happen
 If your stat tracker seems to be unresponsive or misbehaving, it is likely due to an issue with the dolphin-memory-engine Python module. Since it is not an issue caused by the stat tracker itself, I am unable to fix it directly. I have, however, found a workaround for this issue.
 
