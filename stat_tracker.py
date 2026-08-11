@@ -467,9 +467,10 @@ def _check_if_steal_success(game: Game, runner: Player, base_num: int, mc: Match
             log.warning(f"{runner.name} may have scored or gotten out. functionality not there yet")
             return
         
-        if player is runner and (runner.baserunner_info.base_num > steal_base_num) or player in mc.runners_scored_this_pitch:
+        stolen_bases = runner.baserunner_info.base_num - steal_base_num
+        if player is runner and (stolen_bases > 0) or player in mc.runners_scored_this_pitch:
             log.info(f"{runner.name} stole a base!")
-            runner.stats.running.stolen_bases += 1
+            runner.stats.running.stolen_bases += stolen_bases
 
 
 def _check_for_bean_ball(game: Game, mc: MatchContext):
@@ -800,6 +801,9 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
             mc.batter.stats.batting.flyouts += 1
         elif landing_status in (BallLandingStatus.FAIR, BallLandingStatus.FAIR_FIELDED):
             mc.batter.stats.batting.ground_outs += 1
+        
+        mc.at_bat_eligible = True
+        mc.plate_appearance_completed = True
 
     mc.pitcher.stats.pitching.outs_pitched += 1
     mc.baserunners[out_runner_id.value] = NO_PLAYER
