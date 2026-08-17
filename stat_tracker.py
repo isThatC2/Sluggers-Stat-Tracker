@@ -766,7 +766,7 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
             mc.at_bat_eligible = False
             #log.info(f"plate_appearance_completed and at_bat_eligible both set to false for pickoff on 3 outs")
     
-    if out_runner in mc.steal_attempters:
+    if any(runner == out_runner for runner, _ in mc.steal_attempters):
         log.info(f"{out_runner.name} was caught stealing!")
         out_runner.stats.running.caught_stealing += 1
         if mc.outs == 3:
