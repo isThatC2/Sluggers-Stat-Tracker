@@ -31,7 +31,7 @@ class GameLogCacheHandler(logging.Handler):
         except Exception:
             pass
 
-class HomeRunLog(): 
+class HomeRunLog():  # Unused for Now
     def __init__(self, batter: Player, pitcher: Player, num_runs: int, offense_team: Team, defense_team: Team, 
                  num_outs: int, inning_half: str, inning_num: int, inside_the_park_hr: bool = False):
         self.batter = batter
@@ -751,11 +751,11 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
 
     
     log.info(f"{last_holder.name} put {out_runner.name} out!")
-    
     # Checks for if out can be classified as a specific type of out and awards stats accordingly.
     if last_holder is mc.buddy_jumper:
         log.info(f"{last_holder.name} went high up with the buddy jump to get the out!")
         last_holder.stats.fielding.buddy_jump_outs += 1
+        mc.batter.stats.batting.buddy_jumps_hit_into += 1
     
     if mc.pickoff_attempt_flag:
         log.info(f"{mc.pitcher.name} picked off {out_runner.name}!")
@@ -811,6 +811,8 @@ def _record_out(game: Game, mc: MatchContext, last_holder: Player, last_thrower:
     if inher_runner is not None:
         mc.inherited_baserunners.remove((inher_runner, old_pitcher))
         #print(f"({inher_runner.name}, {old_pitcher.name}) removed from inherited runners list")
+
+    log.info(f"{last_holder.name} - {last_holder.stats.fielding.putouts} PO, {last_holder.stats.fielding.assists} A, {last_holder.stats.fielding.double_plays} DP, {last_holder.stats.fielding.triple_plays} TP, {last_holder.stats.fielding.buddy_jump_outs} Buddy Jump Putouts, {last_holder.stats.fielding.bobbles} Bobbles")
 
 
 def _record_score_change(game: Game, mc: MatchContext, sacrifice_possible: bool):
@@ -919,11 +921,17 @@ def _award_double_or_triple_plays(game: Game, mc: MatchContext):
         for player in mc.out_contributors:
             log.info(f"{player.name} was credited with a double play!")
             player.stats.fielding.double_plays += 1
+        
+        mc.batter.stats.batting.double_plays_hit_into += 1
+        game.defense_team.double_plays += 1
     else:
         #print(f"Number of triple play contributors: {len(mc.out_contributors)}")
         for player in mc.out_contributors:
             log.info(f"{player.name} was credited with a triple play!")
             player.stats.fielding.triple_plays += 1
+        
+        mc.batter.stats.batting.triple_plays_hit_into += 1
+        game.defense_team.triple_plays += 1
     
 
 
@@ -1060,6 +1068,12 @@ def batting_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchC
         print()
         log.info(f"{mc.pitcher.name} vs. {mc.batter.name}")
         log.info(f"{game.outs.value} outs")
+        
+        s = mc.batter.stats
+        p = mc.pitcher.stats
+        log.info(f"{mc.batter.name} - {s.batting.hits}/{s.batting.at_bats} ({s.batting.batting_average:.3f}), {s.running.runs} R, {s.batting.rbi} RBI, {s.batting.home_runs} HR, {s.running.stolen_bases} SB, {s.batting.star_hits} Star Hits")
+        log.info(f"{mc.pitcher.name} - {p.pitching.innings_pitched:.2f} IP, {p.pitching.batters_faced} BF, {p.pitching.hits_allowed} H, {p.pitching.earned_runs} ER, {p.pitching.walks} BB, {p.pitching.bean_balls} HBP, {p.pitching.strikeouts} K, {p.pitching.home_runs_allowed} HR, {p.pitching.era_per_9:.3f} ERA-9, {p.pitching.star_pitches} Star Pitches")
+        
         mc.plate_appearance_begun = True
 
     log.debug(f"Count: {game.balls.value}-{game.strikes.value}")
@@ -1367,17 +1381,17 @@ def hr_base_celebration_state(state: Field, mc: MatchContext, last_pitch: PitchS
 
     mc.home_run_flag = True
     mc.inside_the_park_hr_flag = False
-    game.this_pitch.runs.refresh()
-    if game.this_pitch.runs.value == 1:
+    
+    if mc.num_baserunners == 1:
         mc.batter.stats.batting.one_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a solo homer off of {mc.pitcher.name}!")
-    elif game.this_pitch.runs.value == 2:
+    elif mc.num_baserunners == 2:
         mc.batter.stats.batting.two_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a two-run homer off of {mc.pitcher.name}!")
-    elif game.this_pitch.runs.value == 3:
+    elif mc.num_baserunners == 3:
         mc.batter.stats.batting.three_run_homeruns += 1
         log.info(f"{mc.batter.name} hits a three-run homer off of {mc.pitcher.name}!")
-    elif game.this_pitch.runs.value >= 4:
+    elif mc.num_baserunners >= 4:
         mc.batter.stats.batting.grand_slams += 1
         log.info(f"{mc.batter.name} hits a grand slam off of {mc.pitcher.name}!")
     else:

@@ -113,7 +113,9 @@ CHAR_ID_TO_NAME = {
     0x38:"Funky Kong", 0x39:"Tiny Kong", 0x3A:"Kritter", 0x3B:"Blue Kritter",
     0x3C:"Red Kritter", 0x3D:"Brown Kritter", 0x3E:"King K. Rool", 0x3F:"Baby Peach",
     0x40:"Baby Daisy", 0x41:"Baby DK", 0x42:"Red Yoshi", 0x43:"Blue Yoshi",
-    0x44:"Yellow Yoshi", 0x45:"Light Blue Yoshi", 0x46:"Pink Yoshi", 0x4D: "Red Mii (M)",
+    0x44:"Yellow Yoshi", 0x45:"Light Blue Yoshi", 0x46:"Pink Yoshi", 0x47: "Unused Yoshi",
+    0x48: "Unused Yoshi (White)", 0x49: "Unused Toad", 0x4A: "Unused Pianta",
+    0x4B: "Unused Kritter", 0x4C: "Unused Koopa" , 0x4D: "Red Mii (M)",
     0x4E: "Orange Mii (M)", 0x4F: "Yellow Mii (M)", 0x50: "Light Green Mii (M)",
     0x51: "Green Mii (M)", 0x52: "Blue Mii (M)", 0x53: "Light Blue Mii (M)",
     0x54: "Pink Mii (M)", 0x55: "Purple Mii (M)", 0x56: "Brown Mii (M)",
@@ -173,6 +175,10 @@ class Player(Refreshable,Writable):
                 self.plate_appearances = 0
                 self.sac_flys = 0
                 self.sac_bunts = 0
+                self.buddy_jumps_hit_into = 0
+                self.double_plays_hit_into = 0
+                self.triple_plays_hit_into = 0
+                
                     
         
             @property
@@ -604,6 +610,8 @@ class Team(Refreshable, Writable):
         self.starting_lineup_set = False
         self.starting_lineup: dict[Player, str] = {}
         self.pitcher_order: list[Player] = []
+        self.double_plays = 0
+        self.triple_plays = 0
 
        
         
@@ -614,6 +622,51 @@ class Team(Refreshable, Writable):
     @property
     def short_name(self):
         return self.TEAM_BRANDING_SHORT.get(self.branding.value)
+
+    @staticmethod
+    def _normalize_stat_key(value: str) -> str:
+        return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+    def get_team_stat_total(self, stat_type: str, stat_name: str):
+        """Return the sum of a stat across every player on the team.
+
+        Examples:
+            team.get_team_stat_total("Batting", "strikeouts")
+            team.get_team_stat_total("Pitching", "earned_runs")
+        """
+        category_key = self._normalize_stat_key(stat_type)
+        stat_key = self._normalize_stat_key(stat_name)
+
+        category_map = {
+            "batting": "batting",
+            "pitching": "pitching",
+            "fielding": "fielding",
+            "running": "running",
+        }
+
+        category_name = category_map.get(category_key)
+        if category_name is None:
+            raise ValueError(f"Unknown stat type: {stat_type}")
+
+        total = 0
+        for player in self.players:
+            stat_group = getattr(player.stats, category_name, None)
+            if stat_group is None:
+                raise ValueError(f"Player '{player.name}' does not have stat type '{stat_type}'")
+
+            if not hasattr(stat_group, stat_key):
+                raise ValueError(f"Unknown stat '{stat_name}' for stat type '{stat_type}'")
+
+            value = getattr(stat_group, stat_key)
+            if value is None:
+                continue
+            if not isinstance(value, (int, float)):
+                raise TypeError(
+                    f"Stat '{stat_name}' for stat type '{stat_type}' must be numeric, got {type(value).__name__}"
+                )
+            total += value
+
+        return total
         
             
         
