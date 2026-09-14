@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 import dolphin_memory_engine as dme
 import outputter as out
+from advanced_tracking import AdvancedSupervisor, AdvancedTrackingError
 from dolphin_mem import Data, read_data
 from MemoryHandling.sluggers_data import Field, Player, Team, Game, NO_PLAYER, NO_TEAM
 from enum import Enum
@@ -151,6 +152,10 @@ class MatchContext:
         self.double_play_flag: bool = False
         self.triple_play_flag: bool = False
         self.star_swing_flag: bool = False
+        # Advanced tracking is isolated in a child process. None means it did
+        # not start (or already finalized); original stat tracking is valid in
+        # either case.
+        self.advanced_supervisor: AdvancedSupervisor | None = None
 
 
 # Holds a snapshot of the game state at the time of each pitch. Used to check for changes that can't be tracked live during the pitch and update stats accordingly at the start of the next pitch.
@@ -219,6 +224,65 @@ def check_hook_status():
     else:
         log.critical("Program is NOT hooked to Dolphin. Closing immediately.")
         sys.exit()
+
+# The scalars a live match always holds, and every value each one can take.
+#
+# THIS IS A SENTINEL FOR THE dolphin-memory-engine FAULT IN THE README, not a
+# game rule. When that fault is active the reads come back as garbage, the
+# game-state byte lands on some value that is not the "match starting" pair,
+# and detect_match_start cannot tell that from a match genuinely already in
+# progress -- so the tracker announces "a game has already started" and then
+# records a box score built out of nonsense. A real match in progress passes
+# every line below; garbage does not.
+MATCH_SENTINELS = (
+    ("outs", 0x900D5AA9, range(0, 3)),
+    ("balls", 0x900D5AA8, range(0, 4)),
+    ("strikes", 0x900D5AA7, range(0, 3)),
+    ("inning", 0x900D5D97, range(1, 51)),
+    ("inning half", 0x900D5E25, range(0, 2)),
+    ("stadium", 0x811F769D, range(0, 9)),
+)
+MISREAD_RECHECK_SECONDS = 2.0
+
+
+def implausible_match_values() -> list:
+    """Which sentinels hold a value a live match could not produce."""
+    wrong = []
+    for name, address, allowed in MATCH_SENTINELS:
+        try:
+            value = int.from_bytes(read_data(Data(address, 1)), "big")
+        except Exception:
+            return [f"{name}=unreadable"]
+        if value not in allowed:
+            wrong.append(f"{name}={value}")
+    return wrong
+
+
+def wait_for_a_readable_match() -> None:
+    """Hold until the game reads back sanely, then return.
+
+    Recovery is automatic: the MMU toggle in the README is done with Dolphin
+    still open, so the reads simply start making sense again and this returns
+    on its own. The warning prints once rather than every two seconds.
+    """
+    wrong = implausible_match_values()
+    if not wrong:
+        return
+    log.error(
+        "Dolphin is returning values no live match can hold "
+        f"({', '.join(wrong)}). Stats are NOT being tracked."
+    )
+    log.error(
+        "This is the dolphin-memory-engine fault in the README. Make a save "
+        "state, close Mario Super Sluggers but leave Dolphin open, toggle "
+        "Config -> Advanced -> Enable MMU on and off a few times (leaving it "
+        "off), reopen the game and load the save state. Tracking resumes here "
+        "by itself once the values read correctly."
+    )
+    while implausible_match_values():
+        time.sleep(MISREAD_RECHECK_SECONDS)
+    log.info("Dolphin is reading correctly again. Resuming.")
+
 
 def detect_match_start():
     """Keeps checking the game state until a match is starting or already in progress.
@@ -329,9 +393,67 @@ def record_if_increased(new_val, old_val, *stat_fields: tuple, label=None) -> bo
     return False
 
 
-def output_stats_to_excel(game: Game) -> str:
+def _advanced_game_summary(game: Game) -> dict:
+    def display(value):
+        return getattr(value, "display", value)
+
+    return {
+        "tracker_version": "1.0.0-advanced",
+        "memory_profile": "R4QE01",
+        "away_team": getattr(game.away_team, "name", None),
+        "home_team": getattr(game.home_team, "name", None),
+        "park": display(game.stadium),
+        "time_of_day": display(game.time_of_day),
+        "innings": getattr(game.regulation_innings, "value", None),
+        "ended_early": bool(game.match_quit_early),
+    }
+
+
+def _start_advanced_tracking(mc: MatchContext) -> None:
+    try:
+        supervisor = AdvancedSupervisor(Path.cwd() / "output")
+        supervisor.start()
+        mc.advanced_supervisor = supervisor
+        log.info("Advanced stat tracking started.")
+    except Exception as error:
+        # The original tracker is the fallback product, not collateral damage.
+        mc.advanced_supervisor = None
+        log.warning(f"Advanced stat tracking could not start: {error}")
+
+
+def _discard_advanced_tracking(mc: MatchContext | None) -> None:
+    """Drop a capture whose match ended without ever writing a workbook.
+
+    Nothing else stops the worker: the rematch path builds a fresh
+    MatchContext, and dropping the old one leaves the child process reading
+    Dolphin beside its replacement with its capture still on disk.
+    """
+
+    if mc is None or mc.advanced_supervisor is None:
+        return
+    try:
+        mc.advanced_supervisor.discard()
+    except Exception as error:
+        log.warning(f"Advanced capture could not be discarded: {error}")
+    finally:
+        mc.advanced_supervisor = None
+
+
+def output_stats_to_excel(game: Game, mc: MatchContext | None = None) -> str:
     outputter = out.Outputter("Stat_Template_DO_NOT_REMOVE.xlsx", game)
     output_filename = outputter.output_game(game)
+    if mc is not None and mc.advanced_supervisor is not None:
+        original_path = Path.cwd() / "output" / output_filename
+        try:
+            advanced_path = mc.advanced_supervisor.stop_and_export(
+                original_path, _advanced_game_summary(game))
+            log.info(f"Advanced stats saved to '{advanced_path.name}'")
+        except AdvancedTrackingError as error:
+            log.warning(f"Advanced stats were unavailable: {error}")
+        except Exception as error:
+            log.exception(f"Advanced stats export failed: {error}")
+        finally:
+            mc.advanced_supervisor = None
     return output_filename
     
 
@@ -1369,7 +1491,7 @@ def pause_state(state: Field, game: Game, team1: Team, team2: Team, mc: MatchCon
 
 def end_stat_screen_state(state: Field, team1: Team, team2: Team, mc: MatchContext):
     check_hook_status()
-    output_filename = output_stats_to_excel(game)
+    output_filename = output_stats_to_excel(game, mc)
     _write_game_log_file(output_filename)
     mc.stats_outputted = True
     while state.display == "END_STAT_SCREEN":
@@ -1459,6 +1581,7 @@ def pre_pitch_cutscene_state(state: Field, game: Game, team1: Team, team2: Team,
 def _rematch_state(state: Field, old_game: Game, old_team1: Team, old_team2: Team, old_mc: MatchContext, old_last_pitch: PitchSnapshot) -> tuple[Game, Team, Team, MatchContext, PitchSnapshot]:
     time.sleep(1.5)
     log.info("Rematch detected. Resetting game state...")
+    _discard_advanced_tracking(old_mc)
     del old_game, old_team1, old_team2, old_mc, old_last_pitch
     team1 = Team(**TEAM1_ADDRESSES)
     team2 = Team(**TEAM2_ADDRESSES)
@@ -1477,6 +1600,7 @@ def _rematch_state(state: Field, old_game: Game, old_team1: Team, old_team2: Tea
         False, False, False, False, False, False, 0, 0
     )
     _assign_score_and_meter_fields(game)
+    _start_advanced_tracking(mc)
     log.info(f"{game.team1.name} vs. {game.team2.name} @ {game.time_of_day.display} {game.stadium.display}")
     log.info(f"The {game.offense_team.short_name} will bat first!")
     return game, team1, team2, mc, last_pitch
@@ -1487,6 +1611,11 @@ def _rematch_state(state: Field, old_game: Game, old_team1: Team, old_team2: Tea
 
 # ------Main Code-------
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--advanced-worker":
+        del sys.argv[1]
+        from advanced_tracking.engine.collector import main as advanced_worker_main
+        sys.exit(advanced_worker_main())
+
     TEAM1_ADDRESSES = {
         "base_address_list": [0x8131B4B9 + i * 0x8E for i in range(9)],
         "stamina_address_list": [0x900D61A0 + i * 0x20 for i in range(9)],
@@ -1525,6 +1654,13 @@ if __name__ == "__main__":
 
         while True:
             match_start = detect_match_start()
+            # 2 is "already in progress OR MISREAD", and the two are only
+            # separable by looking at whether the rest of the game reads sanely.
+            # After a recovery the state byte is re-read rather than trusted:
+            # the reads that were garbage a moment ago included that one.
+            if match_start == 2 and implausible_match_values():
+                wait_for_a_readable_match()
+                continue
             if match_start is not None:
                 break
 
@@ -1561,6 +1697,8 @@ if __name__ == "__main__":
         
         if match_start == 2:
             _assign_score_and_meter_fields(game)
+
+        _start_advanced_tracking(match_context)
 
         while game.being_played:
             match state.display:
@@ -1600,7 +1738,7 @@ if __name__ == "__main__":
 
         log.info("Game ended. Printing stats:")
         if not match_context.stats_outputted:
-            output_filename = output_stats_to_excel(game)
+            output_filename = output_stats_to_excel(game, match_context)
             _write_game_log_file(output_filename)
             match_context.stats_outputted = True
 

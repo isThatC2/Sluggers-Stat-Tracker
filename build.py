@@ -11,7 +11,10 @@ SPEC = ROOT / "sluggers-stat-tracker.spec"
 NAME = "sluggers-stat-tracker"
 RELEASE_FILES = {
     ROOT / "Stat_Template_DO_NOT_REMOVE.xlsx": DIST / "Stat_Template_DO_NOT_REMOVE.xlsx",
-    ROOT / "MemoryHandling" / "team_branding.json": DIST / "MemoryHandling" / "team_branding.json",
+    # An update ZIP must never overwrite a community member's customized
+    # branding. The bundled default remains available to the executable; this
+    # editable copy is explicitly an example for new installations.
+    ROOT / "MemoryHandling" / "team_branding.json": DIST / "MemoryHandling" / "team_branding.example.json",
 }
 
 

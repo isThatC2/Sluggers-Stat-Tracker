@@ -8,8 +8,15 @@ a = Analysis(
     datas=[
         ("Stat_Template_DO_NOT_REMOVE.xlsx", "."),
         ("MemoryHandling/team_branding.json", "MemoryHandling"),
+        ("advanced_tracking/engine/mss_character_ids.json", "advanced_tracking/engine"),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        "advanced_tracking.engine.collector",
+        "advanced_tracking.engine.derive",
+        "advanced_tracking.engine.live",
+        "advanced_tracking.engine.tracking_io",
+        "advanced_tracking.engine.ball_memory",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

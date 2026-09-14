@@ -27,13 +27,31 @@ Download the [latest portable version](https://isthatc2.github.io/Sluggers-Stat-
 - Run stat_tracker.py anytime before an exhibition match begins. This can be done anywhere from the title screen up until the end of the match start cutscene.
 - The stat tracker will wait until it detects a match starting and will automatically begin tracking stats!
 - That's it! You can view the play-by-play logs in the terminal or you can minimize it until the game is over.
-- Once the match ends and the game reaches the MVP screen (or if the match is ended early), the stat tracker will output an Excel sheet (.xlsx) and a .log file containing its results.
+- Once the match ends and the game reaches the MVP screen (or if the match is ended early), the stat tracker will output its original Excel sheet (.xlsx), an additive `- Advanced.xlsx` workbook, and its original .log file.
 - The tracker will automatically start tracking a new game if you click the rematch button, otherwise if you exit to the main menu, the tracker will ask you if you want to track another game.
+
+## Advanced Excel Workbook
+
+Advanced tracking starts automatically with each match. It runs in an isolated background process, and it does not require a server, account, API key, internet connection, or separate command. The original workbook remains unchanged. The second workbook contains these sheets:
+
+- **Game Summary** - match identity and tracker schema version.
+- **Batted Balls** - exit velocity, launch angle, spray angle, distance, hang time, and landing/catch point.
+- **Fielding** - first touch, route efficiency, reaction, sprint speed, and measured catch approach.
+- **Baserunning** - speed, path, lead, home-to-first time, and normalized 90-foot split.
+- **Throws** - throw chain, velocity, release time, flight time, and endpoints.
+- **Pitches** - pitcher, batter, offer, outcome, and any validated pitch measurements available for that pitch.
+- **Capture Health** - frame loss and calibration status so unavailable measurements are visible rather than guessed.
+
+This build contains no stadium-specific measurement at all: no park geometry, no gimmick or hazard detection, and no attribution of a play to a stadium object. An affected metric is left blank when the capture missed required frames, player-position calibration did not confirm, or forced/immobilized movement would make that number misleading. If advanced tracking cannot start or export, the original tracker and original workbook continue normally.
+
+The advanced workbook can report a slightly higher pitch count than the original one, and the original is the one that is low. The original tracker increments its pitch counter inside the `BATTING` state loop, so a pitch thrown while the game has briefly left that state is not counted -- in a measured three-inning test the two disagreed by exactly three, all of them two-strike foul balls. The advanced worker reads every frame regardless of game state, so it sees them. Nothing else in the original workbook is affected.
+
+Advanced memory addresses currently support the USA game revision (`R4QE01`) only. A real Dolphin match is still the required final compatibility check for each release build.
 
 ## Custom Team Names
 Want to change the team names in the stat tracker for your league? Sluggers Stat Tracker supports custom team names!
 - Go to your extracted folder
-- Open the MemoryHandling folder and open team_branding.json in a text editor
+- Open the MemoryHandling folder. On a new install, rename `team_branding.example.json` to `team_branding.json`, then open it in a text editor. Update ZIPs deliberately do not contain `team_branding.json`, so an existing customization is not overwritten.
 - Change the full and short team name to your name of choice. For example, to change the Mario Fireballs to the Delfino Sunburns, you would replace "Mario Fireballs" with Delfino Sunburns and "Fireballs" with Sunburns
 
 ## My Stat Tracker Isn't Detecting Match Start / Is Detecting a Match Start That Didn't Happen
